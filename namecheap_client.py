@@ -82,9 +82,12 @@ class NamecheapAPIClient:
             response.raise_for_status()
             
             print(f"Response status: {response.status_code}")
+            print(f"Response content (first 500 chars): {response.text[:500]}")
             
             # Parse XML response
             root = ET.fromstring(response.content)
+            print(f"XML root tag: {root.tag}")
+            print(f"XML root attributes: {root.attrib}")
             
             # Check for API errors
             errors = root.find('.//Errors')
@@ -93,7 +96,11 @@ class NamecheapAPIClient:
                 print(f"Namecheap API Error: {error_msg}")
                 raise NamecheapAPIError(f"Namecheap API Error: {error_msg}")
             
-            return self._xml_to_dict(root)
+            # Convert to dict and log structure
+            result = self._xml_to_dict(root)
+            print(f"Parsed result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+            
+            return result
             
         except requests.RequestException as e:
             print(f"Request failed: {e}")
