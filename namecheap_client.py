@@ -103,13 +103,17 @@ class NamecheapAPIClient:
         """Convert XML element to dictionary"""
         result = {}
         
-        # Add attributes
+        # Add attributes as part of the main dict
         if element.attrib:
             result.update(element.attrib)
         
-        # Add text content
+        # Add text content if exists
         if element.text and element.text.strip():
-            result['_text'] = element.text.strip()
+            if element.attrib or len(element) > 0:
+                result['_text'] = element.text.strip()
+            else:
+                # If no attributes and no children, just return the text
+                return element.text.strip()
         
         # Process child elements
         for child in element:
@@ -123,7 +127,8 @@ class NamecheapAPIClient:
             else:
                 result[child.tag] = child_data
         
-        return result
+        # If result only has attributes, make sure we return them
+        return result if result else None
     
     def test_connection(self) -> bool:
         """Test API connection and credentials"""
@@ -133,20 +138,24 @@ class NamecheapAPIClient:
             # Use getList command to test connection
             response = self._make_request('namecheap.domains.getList')
             
+            print(f"API Response keys: {list(response.keys()) if response else 'None'}")
+            
             # Check if response is successful
-            if 'ApiResponse' in response:
-                print("✅ Namecheap API connection successful")
-                return True
+            if response and 'ApiResponse' in response:
+                api_response = response['ApiResponse']
+                if isinstance(api_response, dict) and api_response.get('Status') == 'OK':
+                    print("✅ Namecheap API connection successful")
+                    return True
+                else:
+                    print(f"❌ API returned status: {api_response.get('Status') if isinstance(api_response, dict) else 'Unknown'}")
+                    return False
             else:
                 print("❌ Unexpected API response format")
+                print(f"Response sample: {str(response)[:200]}...")
                 return False
                 
         except Exception as e:
             print(f"❌ Namecheap API connection failed: {e}")
-            # Try to extract actual IP from error message if available
-            error_str = str(e)
-            if "Invalid request IP" in error_str:
-                print(f"🔍 Actual IP being used: Check error message for IP")
             return False
     
     def get_domain_list(self) -> List[Dict]:
