@@ -12,7 +12,7 @@ services:
       - key: NAMECHEAP_USERNAME
         value: YOUR_NAMECHEAP_USERNAME
       - key: NAMECHEAP_CLIENT_IP
-        sync: false
+        value: 44.226.145.213
       - key: SECRET_KEY
         value: email-redirect-secure-key-2024-change-in-production
       - key: FLASK_ENV
