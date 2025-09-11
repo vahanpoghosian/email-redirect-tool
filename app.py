@@ -130,7 +130,7 @@ DASHBOARD_TEMPLATE = """
     <script>
         let allDomains = [];
         let currentPage = 1;
-        let domainsPerPage = 10;
+        let domainsPerPage = 25;
         let isLoading = false;
         let hasMore = true;
         let totalDomains = 0;
@@ -618,10 +618,10 @@ def get_domains_with_redirections():
                 }
             }), 404
         
-        # Get redirections for each domain (limit to first 20 to avoid rate limits)
+        # Get redirections for each domain (limit to first 50 with slower rate)
         domains_with_redirections = []
         processed = 0
-        max_domains = min(20, len(domains))  # Process only first 20 domains to avoid rate limits
+        max_domains = min(100, len(domains))  # Process up to 100 domains with rate limiting
         
         for domain in domains[:max_domains]:
             try:
@@ -636,9 +636,9 @@ def get_domains_with_redirections():
                 processed += 1
                 print(f"Processed {processed}/{max_domains}: {domain} - {len(redirections)} URL redirections")
                 
-                # Add small delay to avoid rate limiting
+                # Add delay to avoid rate limiting
                 import time
-                time.sleep(0.2)  # 200ms delay between requests
+                time.sleep(0.5)  # 500ms delay between requests to be safer
                 
             except Exception as e:
                 print(f"Error processing domain {domain}: {e}")
@@ -719,7 +719,7 @@ def get_domains_batch():
         
         # Get pagination parameters
         page = int(request.args.get('page', 1))
-        per_page = int(request.args.get('per_page', 10))
+        per_page = int(request.args.get('per_page', 25))  # Increased to 25 domains per batch
         
         # Get all domains
         domains = email_manager.get_all_domains()
@@ -753,7 +753,7 @@ def get_domains_batch():
                 # Add delay between requests
                 if i < len(batch_domains) - 1:  # Don't delay after last item
                     import time
-                    time.sleep(0.3)  # 300ms delay
+                    time.sleep(0.6)  # 600ms delay to be extra safe
                 
             except Exception as e:
                 print(f"Error processing domain {domain}: {e}")
