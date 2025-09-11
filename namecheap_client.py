@@ -82,29 +82,43 @@ class NamecheapAPIClient:
             response.raise_for_status()
             
             print(f"Response status: {response.status_code}")
+            print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
             print(f"Response content (first 500 chars): {response.text[:500]}")
             
-            # Parse XML response
-            root = ET.fromstring(response.content)
-            print(f"XML root tag: {root.tag}")
-            print(f"XML root attributes: {root.attrib}")
-            
-            # Check for API errors
-            errors = root.find('.//Errors')
-            if errors is not None and len(errors) > 0:
-                error_msg = errors[0].text if errors[0].text else "Unknown API error"
-                print(f"Namecheap API Error: {error_msg}")
-                raise NamecheapAPIError(f"Namecheap API Error: {error_msg}")
-            
-            # Convert to dict and log structure
-            result = self._xml_to_dict(root)
-            print(f"Parsed result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-            
-            return result
+            # Try to parse XML response
+            try:
+                root = ET.fromstring(response.content)
+                print(f"XML root tag: {root.tag}")
+                print(f"XML root attributes: {root.attrib}")
+                
+                # Check for API errors
+                errors = root.find('.//Errors')
+                if errors is not None and len(errors) > 0:
+                    error_msg = errors[0].text if errors[0].text else "Unknown API error"
+                    print(f"Namecheap API Error: {error_msg}")
+                    raise NamecheapAPIError(f"Namecheap API Error: {error_msg}")
+                
+                # Convert to dict and log structure
+                result = self._xml_to_dict(root)
+                print(f"Parsed result type: {type(result)}")
+                if isinstance(result, dict):
+                    print(f"Parsed result keys: {list(result.keys())}")
+                else:
+                    print(f"Parsed result: {result}")
+                
+                return result
+                
+            except ET.ParseError as xml_error:
+                print(f"❌ XML parsing failed: {xml_error}")
+                print(f"Full response content: {response.text}")
+                raise NamecheapAPIError(f"Invalid XML response: {xml_error}")
             
         except requests.RequestException as e:
             print(f"Request failed: {e}")
             raise NamecheapAPIError(f"API request failed: {str(e)}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            raise NamecheapAPIError(f"Unexpected error: {str(e)}")
     
     def _xml_to_dict(self, element) -> Dict:
         """Convert XML element to dictionary"""
