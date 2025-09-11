@@ -107,6 +107,8 @@ class NamecheapAPIClient:
     def test_connection(self) -> bool:
         """Test API connection and credentials"""
         try:
+            print(f"Testing connection with IP: {self.client_ip}")
+            
             # Use getList command to test connection
             response = self._make_request('namecheap.domains.getList')
             
@@ -120,6 +122,10 @@ class NamecheapAPIClient:
                 
         except Exception as e:
             print(f"❌ Namecheap API connection failed: {e}")
+            # Try to extract actual IP from error message if available
+            error_str = str(e)
+            if "Invalid request IP" in error_str:
+                print(f"🔍 Actual IP being used: Check error message for IP")
             return False
     
     def get_domain_list(self) -> List[Dict]:
