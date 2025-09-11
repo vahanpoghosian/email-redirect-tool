@@ -46,14 +46,15 @@ DASHBOARD_TEMPLATE = """
         .group-header { color: #1e293b; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
         .group-count { font-size: 0.8em; color: #64748b; font-weight: normal; }
         .redirect-item { padding: 0.5rem; background: #f8fafc; border-radius: 4px; margin-bottom: 0.5rem; }
-        .domain-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; background: white; }
-        .domain-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-        .domain-name { font-size: 1.2rem; font-weight: 600; color: #1e293b; }
-        .redirection-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px; }
-        .redirection-input { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; flex: 1; }
+        .domain-row { border-bottom: 1px solid #e5e7eb; }
+        .domain-name { font-weight: 600; color: #1e293b; }
+        .redirect-input { width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; }
         .btn-small { padding: 0.5rem 1rem; font-size: 0.875rem; }
-        .status-updating { color: #f59e0b; }
-        .add-redirection { margin-top: 0.5rem; }
+        .status-updating { color: #f59e0b; font-size: 0.875rem; }
+        .status-success { color: #10b981; font-size: 0.875rem; }
+        .status-error { color: #ef4444; font-size: 0.875rem; }
+        .no-redirect { color: #64748b; font-style: italic; }
+        .add-redirect-btn { background: #10b981; color: white; }
         #loading, #domains-view, #raw-data { display: none; }
     </style>
 </head>
@@ -84,15 +85,26 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card" id="domains-view">
-            <h2>All Domains with Redirections</h2>
+            <h2>All Domains with URL Redirections</h2>
             <div id="domains-summary"></div>
             
             <div style="margin: 1rem 0;">
                 <input type="text" class="form-control" id="search-filter" placeholder="Search domains..." onkeyup="filterDomains()" style="width: 300px;">
-                <button class="btn" onclick="loadMoreDomains()" id="load-more-btn" style="display: none;">Load More Domains</button>
+                <button class="btn" onclick="refreshDomains()" style="margin-left: 1rem;">🔄 Refresh</button>
             </div>
             
-            <div id="domains-container"></div>
+            <table class="table" id="domains-table">
+                <thead>
+                    <tr>
+                        <th style="width: 40%;">Domain</th>
+                        <th style="width: 50%;">Redirect Target</th>
+                        <th style="width: 10%;">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="domains-tbody">
+                </tbody>
+            </table>
+            
             <div id="scroll-loader" style="text-align: center; padding: 1rem; display: none;">
                 <div>Loading more domains...</div>
             </div>
@@ -149,12 +161,15 @@ DASHBOARD_TEMPLATE = """
         }
         
         function displayDomains() {
-            const container = document.getElementById('domains-container');
+            const tbody = document.getElementById('domains-tbody');
             const summary = document.getElementById('domains-summary');
+            
+            // Clear existing rows
+            tbody.innerHTML = '';
             
             // Update summary
             const totalDomains = allDomains.length;
-            const domainsWithRedirects = allDomains.filter(d => d.redirections.length > 0).length;
+            const domainsWithRedirects = allDomains.filter(d => d.redirections && d.redirections.length > 0).length;
             
             summary.innerHTML = `
                 <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
@@ -163,73 +178,77 @@ DASHBOARD_TEMPLATE = """
                 </div>
             `;
             
-            loadMoreDomains();
+            // Add all domains to table
+            allDomains.forEach((domain, domainIndex) => {
+                if (domain.redirections && domain.redirections.length > 0) {
+                    // Domain has redirections - show each redirection
+                    domain.redirections.forEach((redirect, redirectIndex) => {
+                        createDomainRow(domain, redirect, redirectIndex, domainIndex);
+                    });
+                } else {
+                    // Domain has no redirections - show empty row
+                    createEmptyDomainRow(domain, domainIndex);
+                }
+            });
+            
+            setupInfiniteScroll();
         }
         
-        function loadMoreDomains() {
-            if (isLoading) return;
+        function createDomainRow(domain, redirect, redirectIndex, domainIndex) {
+            const tbody = document.getElementById('domains-tbody');
+            const row = tbody.insertRow();
+            row.className = 'domain-row';
             
-            isLoading = true;
-            const container = document.getElementById('domains-container');
-            const start = currentPage * domainsPerPage;
-            const end = Math.min(start + domainsPerPage, allDomains.length);
+            // Domain name cell
+            const domainCell = row.insertCell(0);
+            domainCell.innerHTML = `<div class="domain-name">${domain.name}</div>`;
             
-            for (let i = start; i < end; i++) {
-                const domain = allDomains[i];
-                const domainCard = createDomainCard(domain);
-                container.appendChild(domainCard);
-            }
-            
-            currentPage++;
-            isLoading = false;
-            
-            // Show/hide load more button
-            const loadMoreBtn = document.getElementById('load-more-btn');
-            if (end >= allDomains.length) {
-                loadMoreBtn.style.display = 'none';
-            } else {
-                loadMoreBtn.style.display = 'inline-block';
-            }
-        }
-        
-        function createDomainCard(domain) {
-            const card = document.createElement('div');
-            card.className = 'domain-card';
-            card.innerHTML = `
-                <div class="domain-header">
-                    <div class="domain-name">${domain.name}</div>
-                    <div style="font-size: 0.875rem; color: #64748b;">
-                        ${domain.redirections.length} redirect${domain.redirections.length !== 1 ? 's' : ''}
-                    </div>
-                </div>
-                <div id="redirections-${domain.name.replace(/\./g, '-')}">
-                    ${domain.redirections.map((redirect, index) => createRedirectionRow(domain.name, redirect, index)).join('')}
-                </div>
-                <div class="add-redirection">
-                    <button class="btn btn-small" onclick="addRedirection('${domain.name}')">+ Add Redirection</button>
-                </div>
+            // Redirect target cell (editable)
+            const redirectCell = row.insertCell(1);
+            const safeId = `${domain.name.replace(/\./g, '-')}-${redirectIndex}`;
+            redirectCell.innerHTML = `
+                <input type="text" class="redirect-input" 
+                       value="${redirect.target || ''}" 
+                       id="target-${safeId}" 
+                       placeholder="https://example.com">
+                <div id="status-${safeId}" class="status-updating" style="display: none; margin-top: 0.25rem;"></div>
             `;
-            return card;
+            
+            // Action cell
+            const actionCell = row.insertCell(2);
+            actionCell.innerHTML = `
+                <button class="btn btn-small btn-success" onclick="updateDomainRedirect('${domain.name}', '${redirect.name || '@'}', ${redirectIndex})">
+                    Update
+                </button>
+            `;
         }
         
-        function createRedirectionRow(domainName, redirect, index) {
-            const safeId = domainName.replace(/\./g, '-');
-            return `
-                <div class="redirection-row" data-index="${index}">
-                    <label style="min-width: 80px;">From:</label>
-                    <input type="text" class="redirection-input" value="${redirect.name || '@'}" 
-                           id="name-${safeId}-${index}" placeholder="@ or subdomain">
-                    <label style="min-width: 80px;">Redirect to:</label>
-                    <input type="text" class="redirection-input" value="${redirect.target}" 
-                           id="target-${safeId}-${index}" placeholder="https://example.com">
-                    <button class="btn btn-small btn-success" onclick="updateRedirection('${domainName}', ${index})">
-                        Update
-                    </button>
-                    <button class="btn btn-small" style="background: #ef4444;" onclick="removeRedirection('${domainName}', ${index})">
-                        Remove
-                    </button>
-                    <span id="status-${safeId}-${index}" class="status-updating" style="display: none;">Updating...</span>
-                </div>
+        function createEmptyDomainRow(domain, domainIndex) {
+            const tbody = document.getElementById('domains-tbody');
+            const row = tbody.insertRow();
+            row.className = 'domain-row';
+            
+            // Domain name cell
+            const domainCell = row.insertCell(0);
+            domainCell.innerHTML = `<div class="domain-name">${domain.name}</div>`;
+            
+            // Redirect target cell (empty, ready for input)
+            const redirectCell = row.insertCell(1);
+            const safeId = `${domain.name.replace(/\./g, '-')}-new`;
+            redirectCell.innerHTML = `
+                <input type="text" class="redirect-input" 
+                       value="" 
+                       id="target-${safeId}" 
+                       placeholder="Enter redirect URL (https://example.com)">
+                <div id="status-${safeId}" class="status-updating" style="display: none; margin-top: 0.25rem;"></div>
+            `;
+            
+            // Action cell
+            const actionCell = row.insertCell(2);
+            actionCell.innerHTML = `
+                <button class="btn btn-small add-redirect-btn" onclick="addDomainRedirect('${domain.name}')">
+                    + Add
+                </button>
             `;
         }
         
@@ -243,13 +262,11 @@ DASHBOARD_TEMPLATE = """
             });
         }
         
-        async function updateRedirection(domainName, index) {
-            const safeId = domainName.replace(/\./g, '-');
-            const nameField = document.getElementById(`name-${safeId}-${index}`);
-            const targetField = document.getElementById(`target-${safeId}-${index}`);
-            const statusSpan = document.getElementById(`status-${safeId}-${index}`);
+        async function updateDomainRedirect(domainName, redirectName, redirectIndex) {
+            const safeId = `${domainName.replace(/\./g, '-')}-${redirectIndex}`;
+            const targetField = document.getElementById(`target-${safeId}`);
+            const statusDiv = document.getElementById(`status-${safeId}`);
             
-            const name = nameField.value.trim();
             const target = targetField.value.trim();
             
             if (!target) {
@@ -258,9 +275,9 @@ DASHBOARD_TEMPLATE = """
             }
             
             // Show loading status
-            statusSpan.style.display = 'inline';
-            statusSpan.textContent = 'Updating...';
-            statusSpan.className = 'status-updating';
+            statusDiv.style.display = 'block';
+            statusDiv.textContent = 'Updating...';
+            statusDiv.className = 'status-updating';
             
             try {
                 const response = await fetch('/api/update-redirection', {
@@ -270,7 +287,7 @@ DASHBOARD_TEMPLATE = """
                     },
                     body: JSON.stringify({
                         domain: domainName,
-                        name: name,
+                        name: redirectName,
                         target: target
                     })
                 });
@@ -278,72 +295,94 @@ DASHBOARD_TEMPLATE = """
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    statusSpan.textContent = 'Updated!';
-                    statusSpan.className = 'status-success';
+                    statusDiv.textContent = '✅ Updated!';
+                    statusDiv.className = 'status-success';
                     
                     // Update local data
                     const domain = allDomains.find(d => d.name === domainName);
-                    if (domain && domain.redirections[index]) {
-                        domain.redirections[index].name = name;
-                        domain.redirections[index].target = target;
+                    if (domain && domain.redirections && domain.redirections[redirectIndex]) {
+                        domain.redirections[redirectIndex].target = target;
                     }
                 } else {
-                    statusSpan.textContent = 'Error!';
-                    statusSpan.className = 'status-error';
+                    statusDiv.textContent = '❌ Error!';
+                    statusDiv.className = 'status-error';
                     alert(`Update failed: ${result.message}`);
                 }
             } catch (error) {
-                statusSpan.textContent = 'Error!';
-                statusSpan.className = 'status-error';
+                statusDiv.textContent = '❌ Error!';
+                statusDiv.className = 'status-error';
                 alert(`Update failed: ${error.message}`);
             }
             
             // Hide status after 3 seconds
             setTimeout(() => {
-                statusSpan.style.display = 'none';
+                statusDiv.style.display = 'none';
             }, 3000);
         }
         
-        function addRedirection(domainName) {
-            const domain = allDomains.find(d => d.name === domainName);
-            if (!domain) return;
+        async function addDomainRedirect(domainName) {
+            const safeId = `${domainName.replace(/\./g, '-')}-new`;
+            const targetField = document.getElementById(`target-${safeId}`);
+            const statusDiv = document.getElementById(`status-${safeId}`);
             
-            const newRedirect = { name: '@', target: '', type: 'URL Redirect' };
-            domain.redirections.push(newRedirect);
+            const target = targetField.value.trim();
             
-            const safeId = domainName.replace(/\./g, '-');
-            const container = document.getElementById(`redirections-${safeId}`);
-            const newRow = document.createElement('div');
-            newRow.innerHTML = createRedirectionRow(domainName, newRedirect, domain.redirections.length - 1);
-            container.appendChild(newRow.firstElementChild);
+            if (!target) {
+                alert('Please enter a target URL');
+                return;
+            }
+            
+            // Show loading status
+            statusDiv.style.display = 'block';
+            statusDiv.textContent = 'Adding...';
+            statusDiv.className = 'status-updating';
+            
+            try {
+                const response = await fetch('/api/update-redirection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        domain: domainName,
+                        name: '@',
+                        target: target
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    statusDiv.textContent = '✅ Added!';
+                    statusDiv.className = 'status-success';
+                    
+                    // Refresh the domain list to show the new redirect
+                    setTimeout(() => {
+                        refreshDomains();
+                    }, 1000);
+                } else {
+                    statusDiv.textContent = '❌ Error!';
+                    statusDiv.className = 'status-error';
+                    alert(`Add failed: ${result.message}`);
+                }
+            } catch (error) {
+                statusDiv.textContent = '❌ Error!';
+                statusDiv.className = 'status-error';
+                alert(`Add failed: ${error.message}`);
+            }
         }
         
-        function removeRedirection(domainName, index) {
-            if (!confirm('Remove this redirection?')) return;
-            
-            const domain = allDomains.find(d => d.name === domainName);
-            if (!domain) return;
-            
-            domain.redirections.splice(index, 1);
-            
-            // Refresh the domain card
-            const container = document.getElementById('domains-container');
-            const cards = container.children;
-            for (let card of cards) {
-                if (card.innerHTML.includes(domainName)) {
-                    card.replaceWith(createDomainCard(domain));
-                    break;
-                }
-            }
+        function refreshDomains() {
+            loadAllDomains();
         }
         
         function filterDomains() {
             const searchTerm = document.getElementById('search-filter').value.toLowerCase();
-            const cards = document.querySelectorAll('.domain-card');
+            const rows = document.querySelectorAll('.domain-row');
             
-            cards.forEach(card => {
-                const text = card.textContent.toLowerCase();
-                card.style.display = text.includes(searchTerm) ? 'block' : 'none';
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm) ? '' : 'none';
             });
         }
         

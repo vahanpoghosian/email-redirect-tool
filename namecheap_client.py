@@ -213,10 +213,15 @@ class NamecheapAPIClient:
             print(f"❌ Namecheap API connection failed: {e}")
             return False
     
-    def get_domain_list(self) -> List[Dict]:
-        """Get list of all domains in account"""
+    def get_domain_list(self, page: int = 1, page_size: int = 100) -> List[Dict]:
+        """Get list of all domains in account with pagination"""
         try:
-            response = self._make_request('namecheap.domains.getList')
+            # Use pagination parameters to get more domains
+            response = self._make_request(
+                'namecheap.domains.getList',
+                PageSize=page_size,
+                Page=page
+            )
             
             # Navigate to domain data - handle namespaced keys
             domains = []
@@ -243,6 +248,14 @@ class NamecheapAPIClient:
                 print("❌ No DomainGetListResult found")
                 return []
             
+            # Get pagination info
+            paging_info = domain_result.get('Paging', {})
+            if isinstance(paging_info, dict):
+                total_items = paging_info.get('TotalItems', 0)
+                current_page = paging_info.get('CurrentPage', page)
+                page_size_actual = paging_info.get('PageSize', page_size)
+                print(f"📄 Page {current_page}: {total_items} total domains, {page_size_actual} per page")
+            
             # Find Domain data (may be namespaced or direct)
             domain_data = None
             for key, value in domain_result.items():
@@ -258,7 +271,7 @@ class NamecheapAPIClient:
             if isinstance(domain_data, dict):
                 domain_data = [domain_data]
             
-            print(f"🌐 Processing {len(domain_data)} domains from API")
+            print(f"🌐 Processing {len(domain_data)} domains from API page {page}")
             
             for domain in domain_data:
                 if isinstance(domain, dict):
@@ -270,12 +283,42 @@ class NamecheapAPIClient:
                         'auto_renew': domain.get('AutoRenew', False)
                     })
             
-            print(f"Retrieved {len(domains)} domains from account")
+            print(f"Retrieved {len(domains)} domains from page {page}")
             return domains
             
         except Exception as e:
-            print(f"Error getting domain list: {e}")
+            print(f"Error getting domain list page {page}: {e}")
             return []
+    
+    def get_all_domains_paginated(self) -> List[Dict]:
+        """Get ALL domains by fetching all pages"""
+        all_domains = []
+        page = 1
+        page_size = 100
+        
+        while True:
+            print(f"🔄 Fetching domains page {page}...")
+            page_domains = self.get_domain_list(page, page_size)
+            
+            if not page_domains:
+                print(f"✅ Finished fetching domains. Total: {len(all_domains)}")
+                break
+                
+            all_domains.extend(page_domains)
+            
+            # If we got fewer domains than page_size, we're done
+            if len(page_domains) < page_size:
+                print(f"✅ Finished fetching domains. Total: {len(all_domains)}")
+                break
+                
+            page += 1
+            
+            # Safety check to avoid infinite loops
+            if page > 50:  # Max 5000 domains
+                print(f"⚠️ Reached maximum page limit. Total domains: {len(all_domains)}")
+                break
+        
+        return all_domains
     
     def get_email_forwarding(self, domain: str) -> List[Dict]:
         """Get current email forwarding settings for a domain"""
@@ -558,7 +601,7 @@ class EmailRedirectionManager:
     
     def get_all_domains(self) -> List[str]:
         """Get all domains from Namecheap account"""
-        domain_data = self.api_client.get_domain_list()
+        domain_data = self.api_client.get_all_domains_paginated()
         return [domain['name'] for domain in domain_data]
     
     def bulk_set_forwarding(self, domains: List[str], forwarding_rules: List[Dict]) -> Dict:
