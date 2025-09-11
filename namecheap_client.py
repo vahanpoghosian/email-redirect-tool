@@ -412,9 +412,15 @@ class NamecheapAPIClient:
             # Find Host data (may be namespaced or direct)
             host_data = None
             for key, value in hosts_result.items():
-                if 'Host' in key or key == 'Host':
+                if 'Host' in key or key == 'Host' or 'host' in key:
                     host_data = value
                     break
+            
+            # Also try looking for lowercase 'host' key directly
+            if not host_data and 'host' in hosts_result:
+                host_data = hosts_result['host']
+            
+            print(f"🔍 Available keys in hosts_result: {list(hosts_result.keys())}")
             
             if not host_data:
                 print(f"No Host data found for {domain}")

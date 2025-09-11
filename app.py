@@ -571,11 +571,12 @@ def get_domains_with_redirections():
                 }
             }), 404
         
-        # Get redirections for each domain
+        # Get redirections for each domain (limit to first 50 for faster loading)
         domains_with_redirections = []
         processed = 0
+        max_domains = min(50, len(domains))  # Process only first 50 domains for faster response
         
-        for domain in domains:
+        for domain in domains[:max_domains]:
             try:
                 redirections = email_manager.api_client.get_domain_redirections(domain)
                 
@@ -586,7 +587,7 @@ def get_domains_with_redirections():
                 })
                 
                 processed += 1
-                print(f"Processed {processed}/{len(domains)}: {domain} - {len(redirections)} URL redirections")
+                print(f"Processed {processed}/{max_domains}: {domain} - {len(redirections)} URL redirections")
                 
             except Exception as e:
                 print(f"Error processing domain {domain}: {e}")
@@ -597,6 +598,7 @@ def get_domains_with_redirections():
                     'status': 'error',
                     'error': str(e)
                 })
+                processed += 1
                 continue
         
         return jsonify({
