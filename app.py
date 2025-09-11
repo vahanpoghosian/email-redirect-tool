@@ -1,16 +1,14 @@
 """
 Email Redirection Tool - Flask Application
-Bulk email forwarding management for Namecheap domains
+View existing email forwarding for Namecheap domains
 """
 
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, flash
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import json
 import os
 from datetime import datetime
 from namecheap_client import EmailRedirectionManager
-import csv
-import io
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'change-in-production-email-redirect-tool')
@@ -24,7 +22,7 @@ DASHBOARD_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
-    <title>Email Redirection Tool</title>
+    <title>Domain Email Redirections Viewer</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #f8fafc; }
@@ -33,11 +31,10 @@ DASHBOARD_TEMPLATE = """
         .container { max-width: 1200px; margin: 2rem auto; padding: 0 2rem; }
         .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 2rem; }
         .btn { background: #3b82f6; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; margin-right: 1rem; }
-        .btn-danger { background: #ef4444; }
         .btn-success { background: #10b981; }
         .form-group { margin-bottom: 1rem; }
         .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
-        .form-control { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; }
+        .form-control { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; margin-right: 1rem; }
         .table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
         .table th, .table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
         .table th { background: #f9fafb; font-weight: 600; }
@@ -45,304 +42,214 @@ DASHBOARD_TEMPLATE = """
         .status-error { color: #ef4444; font-weight: 600; }
         .progress-bar { width: 100%; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
         .progress-fill { height: 8px; background: #3b82f6; transition: width 0.3s; }
-        #results { display: none; }
+        .group-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+        .group-header { color: #1e293b; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+        .group-count { font-size: 0.8em; color: #64748b; font-weight: normal; }
+        .redirect-item { padding: 0.5rem; background: #f8fafc; border-radius: 4px; margin-bottom: 0.5rem; }
+        #loading, #redirections-view, #raw-data { display: none; }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="logo">📧 Email Redirection Tool</div>
+        <div class="logo">🔍 Domain Email Redirections Viewer</div>
     </div>
     
     <div class="container">
         <div class="card">
-            <h1>Bulk Email Redirection Manager</h1>
-            <p>Manage email forwarding for 200+ domains using Namecheap API</p>
+            <h1>Domain Email Redirection Viewer</h1>
+            <p>View existing email forwarding for all your domains using Namecheap API</p>
         </div>
         
         <div class="card">
-            <h2>Setup Email Forwarding Rules</h2>
-            <div id="forwarding-rules">
-                <div class="form-group">
-                    <label>Forwarding Rules:</label>
-                    <div id="rules-container">
-                        <div class="rule-row" style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
-                            <input type="text" class="form-control" placeholder="From (alias)" name="from_0" value="info">
-                            <input type="text" class="form-control" placeholder="To (destination email)" name="to_0" value="">
-                            <button type="button" class="btn btn-danger" onclick="removeRule(0)">Remove</button>
-                        </div>
-                    </div>
-                    <button type="button" class="btn" onclick="addRule()">Add Rule</button>
-                </div>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>Domain Management</h2>
+            <h2>Load Domain Redirections</h2>
             <div style="margin-bottom: 1rem;">
-                <button class="btn" onclick="loadDomainsFromAPI()">Load Domains from Namecheap</button>
-                <button class="btn" onclick="document.getElementById('csv-upload').click()">Upload CSV</button>
-                <input type="file" id="csv-upload" accept=".csv" style="display: none;" onchange="loadDomainsFromCSV(this)">
+                <button class="btn btn-success" onclick="loadAllRedirections()">Load All Domain Redirections</button>
+                <button class="btn" onclick="exportRedirections()">Export to CSV</button>
             </div>
             
-            <div class="form-group">
-                <label>Domains to Process:</label>
-                <textarea id="domains-list" class="form-control" rows="10" placeholder="Enter domain names, one per line"></textarea>
-                <small>Enter domain names, one per line (e.g., example.com)</small>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>Bulk Processing</h2>
-            <div style="margin-bottom: 1rem;">
-                <button class="btn btn-success" onclick="startBulkProcessing()">Start Bulk Redirection</button>
-                <button class="btn" onclick="previewChanges()">Preview Changes</button>
-            </div>
-            
-            <div id="progress" style="display: none;">
+            <div id="loading">
                 <div class="progress-bar">
-                    <div class="progress-fill" id="progress-fill"></div>
+                    <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
                 </div>
-                <p id="progress-text">Processing...</p>
+                <p id="progress-text">Loading redirections from domains...</p>
             </div>
         </div>
         
-        <div class="card" id="results">
-            <h2>Results</h2>
-            <div id="results-summary"></div>
-            <table class="table" id="results-table">
+        <div class="card" id="redirections-view">
+            <h2>Domain Email Redirections</h2>
+            <div id="redirections-summary"></div>
+            
+            <div style="margin: 1rem 0;">
+                <label>Group by:</label>
+                <select class="form-control" id="group-filter" onchange="updateGrouping()" style="width: auto;">
+                    <option value="target">Target Email</option>
+                    <option value="domain">Domain</option>
+                    <option value="alias">Email Alias</option>
+                </select>
+                
+                <input type="text" class="form-control" id="search-filter" placeholder="Search domains or emails..." onkeyup="filterResults()" style="width: 300px;">
+            </div>
+            
+            <div id="grouped-redirections"></div>
+        </div>
+        
+        <div class="card" id="raw-data">
+            <h2>Raw Data View</h2>
+            <table class="table" id="redirections-table">
                 <thead>
                     <tr>
                         <th>Domain</th>
+                        <th>Email Alias</th>
+                        <th>Redirects To</th>
                         <th>Status</th>
-                        <th>Message</th>
                     </tr>
                 </thead>
-                <tbody id="results-body"></tbody>
+                <tbody id="redirections-body"></tbody>
             </table>
-            <button class="btn" onclick="exportResults()">Export Results</button>
         </div>
     </div>
 
     <script>
-        let ruleCount = 1;
-        let processingResults = [];
+        let allRedirections = [];
+        let groupedData = {};
         
-        function addRule() {
-            const container = document.getElementById('rules-container');
-            const ruleDiv = document.createElement('div');
-            ruleDiv.className = 'rule-row';
-            ruleDiv.style.cssText = 'display: flex; gap: 1rem; margin-bottom: 0.5rem;';
-            ruleDiv.innerHTML = `
-                <input type="text" class="form-control" placeholder="From (alias)" name="from_${ruleCount}" value="">
-                <input type="text" class="form-control" placeholder="To (destination email)" name="to_${ruleCount}" value="">
-                <button type="button" class="btn btn-danger" onclick="removeRule(${ruleCount})">Remove</button>
-            `;
-            ruleDiv.id = `rule-${ruleCount}`;
-            container.appendChild(ruleDiv);
-            ruleCount++;
-        }
-        
-        function removeRule(id) {
-            const ruleDiv = document.getElementById(`rule-${id}`);
-            if (ruleDiv) ruleDiv.remove();
-        }
-        
-        function getForwardingRules() {
-            const rules = [];
-            const container = document.getElementById('rules-container');
-            const rows = container.querySelectorAll('.rule-row');
-            
-            rows.forEach(row => {
-                const fromInput = row.querySelector('input[name^="from_"]');
-                const toInput = row.querySelector('input[name^="to_"]');
-                
-                if (fromInput.value.trim() && toInput.value.trim()) {
-                    rules.push({
-                        from: fromInput.value.trim(),
-                        to: toInput.value.trim()
-                    });
-                }
-            });
-            
-            return rules;
-        }
-        
-        function getDomainsList() {
-            const domainsText = document.getElementById('domains-list').value;
-            return domainsText.split('\\n')
-                .map(domain => domain.trim())
-                .filter(domain => domain.length > 0);
-        }
-        
-        async function loadDomainsFromAPI() {
+        async function loadAllRedirections() {
             try {
-                document.getElementById('domains-list').value = 'Loading domains...';
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('redirections-view').style.display = 'none';
+                document.getElementById('raw-data').style.display = 'none';
                 
-                const response = await fetch('/api/domains');
+                const response = await fetch('/api/all-redirections');
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    const domainsList = data.domains.join('\\n');
-                    document.getElementById('domains-list').value = domainsList;
-                    alert(`Loaded ${data.domains.length} domains from Namecheap API`);
-                } else {
-                    alert(`Error: ${data.message}`);
-                    document.getElementById('domains-list').value = '';
-                }
-            } catch (error) {
-                alert(`Error loading domains: ${error.message}`);
-                document.getElementById('domains-list').value = '';
-            }
-        }
-        
-        function loadDomainsFromCSV(input) {
-            const file = input.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const csv = e.target.result;
-                const lines = csv.split('\\n');
-                const domains = lines
-                    .map(line => line.split(',')[0].trim())
-                    .filter(domain => domain.length > 0 && domain !== 'domain');
-                
-                document.getElementById('domains-list').value = domains.join('\\n');
-                alert(`Loaded ${domains.length} domains from CSV`);
-            };
-            reader.readAsText(file);
-        }
-        
-        async function previewChanges() {
-            const rules = getForwardingRules();
-            const domains = getDomainsList();
-            
-            if (rules.length === 0) {
-                alert('Please add at least one forwarding rule');
-                return;
-            }
-            
-            if (domains.length === 0) {
-                alert('Please add at least one domain');
-                return;
-            }
-            
-            let preview = `Preview Changes:\\n\\n`;
-            preview += `Forwarding Rules (${rules.length}):\\n`;
-            rules.forEach(rule => {
-                preview += `  ${rule.from} → ${rule.to}\\n`;
-            });
-            
-            preview += `\\nDomains to Process (${domains.length}):\\n`;
-            domains.slice(0, 10).forEach(domain => {
-                preview += `  ${domain}\\n`;
-            });
-            
-            if (domains.length > 10) {
-                preview += `  ... and ${domains.length - 10} more domains\\n`;
-            }
-            
-            alert(preview);
-        }
-        
-        async function startBulkProcessing() {
-            const rules = getForwardingRules();
-            const domains = getDomainsList();
-            
-            if (rules.length === 0) {
-                alert('Please add at least one forwarding rule');
-                return;
-            }
-            
-            if (domains.length === 0) {
-                alert('Please add at least one domain');
-                return;
-            }
-            
-            if (!confirm(`Are you sure you want to process ${domains.length} domains?`)) {
-                return;
-            }
-            
-            // Show progress
-            document.getElementById('progress').style.display = 'block';
-            document.getElementById('results').style.display = 'none';
-            
-            try {
-                const response = await fetch('/api/bulk-redirect', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        domains: domains,
-                        forwarding_rules: rules
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    displayResults(data.results);
+                    allRedirections = data.redirections;
+                    displayRedirections();
+                    document.getElementById('redirections-view').style.display = 'block';
+                    document.getElementById('raw-data').style.display = 'block';
                 } else {
                     alert(`Error: ${data.message}`);
                 }
             } catch (error) {
-                alert(`Error: ${error.message}`);
+                alert(`Error loading redirections: ${error.message}`);
             } finally {
-                document.getElementById('progress').style.display = 'none';
+                document.getElementById('loading').style.display = 'none';
             }
         }
         
-        function displayResults(results) {
-            document.getElementById('results').style.display = 'block';
-            
+        function displayRedirections() {
             // Update summary
-            const summary = document.getElementById('results-summary');
+            const summary = document.getElementById('redirections-summary');
+            const totalDomains = new Set(allRedirections.map(r => r.domain)).size;
+            const totalRedirects = allRedirections.length;
+            const uniqueTargets = new Set(allRedirections.map(r => r.target)).size;
+            
             summary.innerHTML = `
-                <h3>Processing Complete</h3>
-                <p>Total Processed: ${results.total_processed}</p>
-                <p>Successful: <span class="status-success">${results.successful.length}</span></p>
-                <p>Failed: <span class="status-error">${results.failed.length}</span></p>
-                <p>Duration: ${results.duration}</p>
+                <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div><strong>Total Domains:</strong> ${totalDomains}</div>
+                    <div><strong>Total Redirections:</strong> ${totalRedirects}</div>
+                    <div><strong>Unique Target Emails:</strong> ${uniqueTargets}</div>
+                </div>
             `;
             
-            // Update table
-            const tbody = document.getElementById('results-body');
+            // Update raw data table
+            const tbody = document.getElementById('redirections-body');
             tbody.innerHTML = '';
             
-            // Add successful domains
-            results.successful.forEach(domain => {
+            allRedirections.forEach(redirect => {
                 const row = tbody.insertRow();
-                row.insertCell(0).textContent = domain;
-                row.insertCell(1).innerHTML = '<span class="status-success">Success</span>';
-                row.insertCell(2).textContent = 'Email forwarding configured';
+                row.insertCell(0).textContent = redirect.domain;
+                row.insertCell(1).textContent = redirect.alias;
+                row.insertCell(2).textContent = redirect.target;
+                row.insertCell(3).innerHTML = redirect.status === 'active' ? 
+                    '<span class="status-success">Active</span>' : 
+                    '<span class="status-error">Inactive</span>';
             });
             
-            // Add failed domains
-            results.failed.forEach(failed => {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = failed.domain;
-                row.insertCell(1).innerHTML = '<span class="status-error">Failed</span>';
-                row.insertCell(2).textContent = failed.error;
-            });
-            
-            processingResults = results;
+            // Update grouping
+            updateGrouping();
         }
         
-        function exportResults() {
-            if (processingResults.length === 0) {
-                alert('No results to export');
+        function updateGrouping() {
+            const groupBy = document.getElementById('group-filter').value;
+            const groupedDiv = document.getElementById('grouped-redirections');
+            
+            // Group data
+            groupedData = {};
+            allRedirections.forEach(redirect => {
+                let key;
+                switch(groupBy) {
+                    case 'target':
+                        key = redirect.target;
+                        break;
+                    case 'domain':
+                        key = redirect.domain;
+                        break;
+                    case 'alias':
+                        key = redirect.alias;
+                        break;
+                }
+                
+                if (!groupedData[key]) {
+                    groupedData[key] = [];
+                }
+                groupedData[key].push(redirect);
+            });
+            
+            // Display grouped data
+            let html = '';
+            Object.entries(groupedData).sort().forEach(([group, redirects]) => {
+                html += `
+                    <div class="group-card">
+                        <div class="group-header">
+                            <h3>${groupBy === 'target' ? '📧' : groupBy === 'domain' ? '🌐' : '📮'} ${group}</h3>
+                            <span class="group-count">${redirects.length} ${redirects.length === 1 ? 'redirect' : 'redirects'}</span>
+                        </div>
+                        <div>
+                `;
+                
+                redirects.forEach(redirect => {
+                    if (groupBy === 'target') {
+                        html += `<div class="redirect-item">
+                            <strong>${redirect.domain}</strong> → ${redirect.alias}@${redirect.domain}
+                        </div>`;
+                    } else if (groupBy === 'domain') {
+                        html += `<div class="redirect-item">
+                            ${redirect.alias}@${redirect.domain} → <strong>${redirect.target}</strong>
+                        </div>`;
+                    } else {
+                        html += `<div class="redirect-item">
+                            <strong>${redirect.domain}</strong> → ${redirect.target}
+                        </div>`;
+                    }
+                });
+                
+                html += `</div></div>`;
+            });
+            
+            groupedDiv.innerHTML = html;
+        }
+        
+        function filterResults() {
+            const searchTerm = document.getElementById('search-filter').value.toLowerCase();
+            const rows = document.getElementById('redirections-body').querySelectorAll('tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm) ? '' : 'none';
+            });
+        }
+        
+        function exportRedirections() {
+            if (allRedirections.length === 0) {
+                alert('No redirections to export. Load data first.');
                 return;
             }
             
-            let csv = 'Domain,Status,Message\\n';
+            let csv = 'Domain,Email Alias,Redirects To,Status\\n';
             
-            processingResults.successful.forEach(domain => {
-                csv += `${domain},Success,Email forwarding configured\\n`;
-            });
-            
-            processingResults.failed.forEach(failed => {
-                csv += `${failed.domain},Failed,"${failed.error}"\\n`;
+            allRedirections.forEach(redirect => {
+                csv += `${redirect.domain},${redirect.alias},${redirect.target},${redirect.status}\\n`;
             });
             
             const blob = new Blob([csv], { type: 'text/csv' });
@@ -350,7 +257,7 @@ DASHBOARD_TEMPLATE = """
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = `email_redirect_results_${new Date().toISOString().slice(0,10)}.csv`;
+            a.download = `domain_redirections_${new Date().toISOString().slice(0,10)}.csv`;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
@@ -372,6 +279,62 @@ except Exception as e:
 def dashboard():
     """Main dashboard"""
     return render_template_string(DASHBOARD_TEMPLATE)
+
+@app.route('/api/all-redirections', methods=['GET'])
+def get_all_redirections():
+    """Get all email redirections from all domains"""
+    try:
+        if not email_manager:
+            return jsonify({
+                "status": "error",
+                "message": "Email manager not initialized. Check API credentials."
+            }), 503
+        
+        # Get all domains
+        domains = email_manager.get_all_domains()
+        
+        if not domains:
+            return jsonify({
+                "status": "error", 
+                "message": "No domains found. Check Namecheap API connection."
+            }), 404
+        
+        # Get redirections for each domain
+        all_redirections = []
+        processed = 0
+        
+        for domain in domains:
+            try:
+                redirections = email_manager.api_client.get_email_forwarding(domain)
+                
+                for redirect in redirections:
+                    all_redirections.append({
+                        'domain': domain,
+                        'alias': redirect['from'],
+                        'target': redirect['to'],
+                        'status': 'active'  # Assume active if returned by API
+                    })
+                
+                processed += 1
+                print(f"Processed {processed}/{len(domains)}: {domain} - {len(redirections)} redirections")
+                
+            except Exception as e:
+                print(f"Error processing domain {domain}: {e}")
+                continue
+        
+        return jsonify({
+            "status": "success",
+            "redirections": all_redirections,
+            "total_domains_processed": processed,
+            "total_redirections": len(all_redirections),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to retrieve redirections: {str(e)}"
+        }), 500
 
 @app.route('/api/domains', methods=['GET'])
 def get_domains():
@@ -396,48 +359,6 @@ def get_domains():
         return jsonify({
             "status": "error",
             "message": f"Failed to retrieve domains: {str(e)}"
-        }), 500
-
-@app.route('/api/bulk-redirect', methods=['POST'])
-def bulk_redirect():
-    """Handle bulk email redirection"""
-    try:
-        if not email_manager:
-            return jsonify({
-                "status": "error",
-                "message": "Email manager not initialized. Check API credentials."
-            }), 503
-        
-        data = request.get_json()
-        
-        if not data or 'domains' not in data or 'forwarding_rules' not in data:
-            return jsonify({
-                "status": "error",
-                "message": "Missing required fields: domains and forwarding_rules"
-            }), 400
-        
-        domains = data['domains']
-        forwarding_rules = data['forwarding_rules']
-        
-        if not domains or not forwarding_rules:
-            return jsonify({
-                "status": "error",
-                "message": "Domains and forwarding rules cannot be empty"
-            }), 400
-        
-        # Process bulk redirection
-        results = email_manager.bulk_set_forwarding(domains, forwarding_rules)
-        
-        return jsonify({
-            "status": "success",
-            "results": results,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"Bulk redirection failed: {str(e)}"
         }), 500
 
 @app.route('/api/health', methods=['GET'])
