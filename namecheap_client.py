@@ -91,18 +91,38 @@ class NamecheapAPIClient:
                 print(f"XML root tag: {root.tag}")
                 print(f"XML root attributes: {root.attrib}")
                 
+                # Handle XML namespace - Namecheap uses xmlns="http://api.namecheap.com/xml.response"
+                namespace = {'nc': 'http://api.namecheap.com/xml.response'}
+                
                 # Check for API errors
-                errors = root.find('.//Errors')
+                errors = root.find('.//nc:Errors', namespace) or root.find('.//Errors')
                 if errors is not None and len(errors) > 0:
                     error_msg = errors[0].text if errors[0].text else "Unknown API error"
                     print(f"Namecheap API Error: {error_msg}")
                     raise NamecheapAPIError(f"Namecheap API Error: {error_msg}")
+                
+                # Check API status
+                status = root.get('Status', 'Unknown')
+                print(f"API Response Status: {status}")
+                
+                if status != 'OK':
+                    print(f"❌ API returned non-OK status: {status}")
+                    return None
                 
                 # Convert to dict and log structure
                 result = self._xml_to_dict(root)
                 print(f"Parsed result type: {type(result)}")
                 if isinstance(result, dict):
                     print(f"Parsed result keys: {list(result.keys())}")
+                    # Log domain count if available
+                    if 'CommandResponse' in result:
+                        cmd_resp = result['CommandResponse']
+                        if isinstance(cmd_resp, dict) and 'DomainGetListResult' in cmd_resp:
+                            domain_result = cmd_resp['DomainGetListResult']
+                            if isinstance(domain_result, dict) and 'Domain' in domain_result:
+                                domains = domain_result['Domain']
+                                domain_count = len(domains) if isinstance(domains, list) else (1 if domains else 0)
+                                print(f"🌐 Found {domain_count} domains in API response")
                 else:
                     print(f"Parsed result: {result}")
                 
