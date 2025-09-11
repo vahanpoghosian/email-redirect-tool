@@ -382,7 +382,16 @@ def get_domains():
 @app.route('/api/debug', methods=['GET'])
 def debug_api():
     """Debug Namecheap API connection"""
+    import requests
+    
     try:
+        # Get our actual outbound IP
+        try:
+            ip_response = requests.get('https://httpbin.org/ip', timeout=10)
+            actual_ip = ip_response.json().get('origin', 'Unknown')
+        except:
+            actual_ip = 'Could not detect'
+        
         if not email_manager:
             return jsonify({
                 "status": "error",
@@ -391,7 +400,8 @@ def debug_api():
                     "NAMECHEAP_API_USER": bool(os.environ.get('NAMECHEAP_API_USER')),
                     "NAMECHEAP_API_KEY": bool(os.environ.get('NAMECHEAP_API_KEY')),
                     "NAMECHEAP_CLIENT_IP": os.environ.get('NAMECHEAP_CLIENT_IP', 'Missing')
-                }
+                },
+                "actual_outbound_ip": actual_ip
             })
         
         # Test connection
@@ -403,6 +413,8 @@ def debug_api():
         return jsonify({
             "status": "debug",
             "connection_test": connection_test,
+            "actual_outbound_ip": actual_ip,
+            "configured_ip": email_manager.api_client.client_ip,
             "api_credentials": {
                 "api_user": email_manager.api_client.api_user,
                 "client_ip": email_manager.api_client.client_ip,
@@ -417,6 +429,7 @@ def debug_api():
         return jsonify({
             "status": "error",
             "message": str(e),
+            "actual_outbound_ip": actual_ip if 'actual_ip' in locals() else 'Unknown',
             "timestamp": datetime.now().isoformat()
         })
 
