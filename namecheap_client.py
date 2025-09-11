@@ -24,19 +24,40 @@ class NamecheapAPIClient:
         self.api_user = os.environ.get('NAMECHEAP_API_USER')
         self.api_key = os.environ.get('NAMECHEAP_API_KEY')
         self.username = os.environ.get('NAMECHEAP_USERNAME', self.api_user)
-        self.client_ip = os.environ.get('NAMECHEAP_CLIENT_IP')
+        
+        # Auto-detect our outbound IP instead of using configured one
+        self.client_ip = self._detect_outbound_ip()
         
         print(f"Namecheap API Client initialized:")
         print(f"  API User: {self.api_user}")
-        print(f"  Client IP: {self.client_ip}")
+        print(f"  Auto-detected Client IP: {self.client_ip}")
         print(f"  API Key: {'Present' if self.api_key else 'Missing'}")
         
-        if not all([self.api_user, self.api_key, self.client_ip]):
+        if not all([self.api_user, self.api_key]):
             missing = []
             if not self.api_user: missing.append('NAMECHEAP_API_USER')
             if not self.api_key: missing.append('NAMECHEAP_API_KEY')
-            if not self.client_ip: missing.append('NAMECHEAP_CLIENT_IP')
             raise NamecheapAPIError(f"Missing required environment variables: {', '.join(missing)}")
+        
+        if not self.client_ip:
+            raise NamecheapAPIError("Could not auto-detect outbound IP address")
+    
+    def _detect_outbound_ip(self) -> str:
+        """Auto-detect our actual outbound IP address"""
+        try:
+            import requests
+            response = requests.get('https://httpbin.org/ip', timeout=10)
+            ip = response.json().get('origin', '').strip()
+            print(f"🔍 Auto-detected outbound IP: {ip}")
+            return ip
+        except Exception as e:
+            print(f"❌ Failed to auto-detect IP: {e}")
+            # Fallback to environment variable if detection fails
+            fallback_ip = os.environ.get('NAMECHEAP_CLIENT_IP')
+            if fallback_ip:
+                print(f"🔄 Using fallback IP from environment: {fallback_ip}")
+                return fallback_ip
+            return None
     
     def _make_request(self, command: str, **params) -> Dict:
         """Make API request to Namecheap"""
