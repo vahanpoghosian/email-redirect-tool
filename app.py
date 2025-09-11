@@ -72,10 +72,22 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card">
-            <h2>Load All Domains</h2>
-            <div style="margin-bottom: 1rem;">
-                <button class="btn btn-success" onclick="loadAllDomains()">Load All Domains</button>
-                <button class="btn" onclick="exportRedirections()">Export to CSV</button>
+            <h2>Domain Management</h2>
+            <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+                <button class="btn btn-success" onclick="syncAllDomainsFromNamecheap()">🔄 Sync All Domains from Namecheap</button>
+                <button class="btn" onclick="loadDomainsFromDB()">📊 Load Domains from Database</button>
+                <button class="btn" onclick="showBulkUpdateModal()">🔧 Bulk Update</button>
+                <button class="btn" onclick="showClientModal()">👥 Manage Clients</button>
+                <button class="btn" onclick="exportRedirections()">📁 Export to CSV</button>
+                <a href="/logout" class="btn" style="background: #ef4444;">🚪 Logout</a>
+            </div>
+            
+            <div id="sync-progress" style="display: none; margin-bottom: 1rem;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="sync-progress-fill" style="width: 0%;"></div>
+                </div>
+                <p id="sync-progress-text">Syncing domains from Namecheap...</p>
+                <div id="sync-status"></div>
             </div>
             
             <div id="loading">
@@ -99,9 +111,11 @@ DASHBOARD_TEMPLATE = """
             <table class="table" id="domains-table">
                 <thead>
                     <tr>
-                        <th style="width: 40%;">Domain</th>
-                        <th style="width: 50%;">Redirect Target</th>
-                        <th style="width: 10%;">Action</th>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 25%;">Domain</th>
+                        <th style="width: 35%;">Redirect Target</th>
+                        <th style="width: 15%;">Client</th>
+                        <th style="width: 20%;">Action</th>
                     </tr>
                 </thead>
                 <tbody id="domains-tbody">
@@ -585,7 +599,7 @@ def require_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'authenticated' not in session:
-            return jsonify({"error": "Authentication required"}), 401
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
