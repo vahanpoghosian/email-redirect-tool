@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: email-redirect-tool
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: NAMECHEAP_API_USER
+        value: YOUR_NAMECHEAP_USERNAME
+      - key: NAMECHEAP_API_KEY
+        value: YOUR_NAMECHEAP_API_KEY
+      - key: NAMECHEAP_USERNAME
+        value: YOUR_NAMECHEAP_USERNAME
+      - key: NAMECHEAP_CLIENT_IP
+        sync: false
+      - key: SECRET_KEY
+        value: email-redirect-secure-key-2024-change-in-production
+      - key: FLASK_ENV
+        value: production
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/health
