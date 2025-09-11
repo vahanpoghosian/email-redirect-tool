@@ -91,6 +91,7 @@ DASHBOARD_TEMPLATE = """
             <div style="margin: 1rem 0;">
                 <input type="text" class="form-control" id="search-filter" placeholder="Search domains..." onkeyup="filterDomains()" style="width: 300px;">
                 <button class="btn" onclick="refreshDomains()" style="margin-left: 1rem;">🔄 Refresh</button>
+                <button class="btn" onclick="loadMoreDomainsBatch()" id="load-more-btn" style="margin-left: 1rem; display: none;">Load More Domains</button>
             </div>
             
             <table class="table" id="domains-table">
@@ -128,36 +129,82 @@ DASHBOARD_TEMPLATE = """
 
     <script>
         let allDomains = [];
-        let currentPage = 0;
+        let currentPage = 1;
         let domainsPerPage = 10;
         let isLoading = false;
+        let hasMore = true;
+        let totalDomains = 0;
         let allRedirections = [];
         let groupedData = {};
         
         async function loadAllDomains() {
             try {
+                // Reset state
+                allDomains = [];
+                currentPage = 1;
+                hasMore = true;
+                
                 document.getElementById('loading').style.display = 'block';
                 document.getElementById('domains-view').style.display = 'none';
                 document.getElementById('raw-data').style.display = 'none';
                 
-                const response = await fetch('/api/domains-with-redirections');
-                const data = await response.json();
+                // Load first batch
+                await loadDomainsBatch(1);
                 
-                if (data.status === 'success') {
-                    allDomains = data.domains;
-                    currentPage = 0;
-                    document.getElementById('domains-container').innerHTML = '';
-                    displayDomains();
-                    document.getElementById('domains-view').style.display = 'block';
-                    setupInfiniteScroll();
-                } else {
-                    alert(`Error: ${data.message}`);
-                }
+                document.getElementById('domains-view').style.display = 'block';
+                document.getElementById('raw-data').style.display = 'block';
+                
             } catch (error) {
                 alert(`Error loading domains: ${error.message}`);
             } finally {
                 document.getElementById('loading').style.display = 'none';
             }
+        }
+        
+        async function loadDomainsBatch(page) {
+            if (isLoading) return;
+            
+            isLoading = true;
+            
+            try {
+                const response = await fetch(`/api/domains-batch?page=${page}&per_page=${domainsPerPage}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Add new domains to existing list
+                    allDomains = allDomains.concat(data.domains);
+                    
+                    // Update pagination info
+                    hasMore = data.pagination.has_next;
+                    totalDomains = data.pagination.total_domains;
+                    currentPage = data.pagination.page;
+                    
+                    // Update display
+                    displayDomains();
+                    
+                    // Show/hide load more button
+                    const loadMoreBtn = document.getElementById('load-more-btn');
+                    if (hasMore) {
+                        loadMoreBtn.style.display = 'inline-block';
+                    } else {
+                        loadMoreBtn.style.display = 'none';
+                    }
+                    
+                } else {
+                    alert(`Error: ${data.message}`);
+                }
+            } catch (error) {
+                alert(`Error loading domain batch: ${error.message}`);
+            } finally {
+                isLoading = false;
+            }
+        }
+        
+        async function loadMoreDomainsBatch() {
+            if (!hasMore || isLoading) return;
+            
+            const nextPage = currentPage + 1;
+            await loadDomainsBatch(nextPage);
         }
         
         function displayDomains() {
@@ -571,10 +618,10 @@ def get_domains_with_redirections():
                 }
             }), 404
         
-        # Get redirections for each domain (limit to first 50 for faster loading)
+        # Get redirections for each domain (limit to first 20 to avoid rate limits)
         domains_with_redirections = []
         processed = 0
-        max_domains = min(50, len(domains))  # Process only first 50 domains for faster response
+        max_domains = min(20, len(domains))  # Process only first 20 domains to avoid rate limits
         
         for domain in domains[:max_domains]:
             try:
@@ -588,6 +635,10 @@ def get_domains_with_redirections():
                 
                 processed += 1
                 print(f"Processed {processed}/{max_domains}: {domain} - {len(redirections)} URL redirections")
+                
+                # Add small delay to avoid rate limiting
+                import time
+                time.sleep(0.2)  # 200ms delay between requests
                 
             except Exception as e:
                 print(f"Error processing domain {domain}: {e}")
@@ -654,6 +705,84 @@ def update_redirection():
         return jsonify({
             "status": "error",
             "message": f"Failed to update redirection: {str(e)}"
+        }), 500
+
+@app.route('/api/domains-batch', methods=['GET'])
+def get_domains_batch():
+    """Get a batch of domains with redirections (paginated)"""
+    try:
+        if not email_manager:
+            return jsonify({
+                "status": "error",
+                "message": "Email manager not initialized. Check API credentials."
+            }), 503
+        
+        # Get pagination parameters
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 10))
+        
+        # Get all domains
+        domains = email_manager.get_all_domains()
+        
+        if not domains:
+            return jsonify({
+                "status": "error", 
+                "message": "No domains found."
+            }), 404
+        
+        # Calculate pagination
+        start_index = (page - 1) * per_page
+        end_index = min(start_index + per_page, len(domains))
+        batch_domains = domains[start_index:end_index]
+        
+        # Process batch with delays
+        domains_with_redirections = []
+        
+        for i, domain in enumerate(batch_domains):
+            try:
+                redirections = email_manager.api_client.get_domain_redirections(domain)
+                
+                domains_with_redirections.append({
+                    'name': domain,
+                    'redirections': redirections,
+                    'status': 'active'
+                })
+                
+                print(f"Batch {page}: Processed {i+1}/{len(batch_domains)}: {domain} - {len(redirections)} redirections")
+                
+                # Add delay between requests
+                if i < len(batch_domains) - 1:  # Don't delay after last item
+                    import time
+                    time.sleep(0.3)  # 300ms delay
+                
+            except Exception as e:
+                print(f"Error processing domain {domain}: {e}")
+                domains_with_redirections.append({
+                    'name': domain,
+                    'redirections': [],
+                    'status': 'error',
+                    'error': str(e)
+                })
+                continue
+        
+        return jsonify({
+            "status": "success",
+            "domains": domains_with_redirections,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total_domains": len(domains),
+                "total_pages": (len(domains) + per_page - 1) // per_page,
+                "has_next": end_index < len(domains),
+                "has_prev": page > 1
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to retrieve domain batch: {str(e)}"
         }), 500
 
 @app.route('/api/all-redirections', methods=['GET'])
