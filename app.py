@@ -633,6 +633,137 @@ DASHBOARD_TEMPLATE = """
                 console.error('Sync error:', error);
             }
         }
+        
+        async function loadDomainsFromDB() {
+            try {
+                const response = await fetch('/api/domains-from-db');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayDomainsTable(data.domains, data.clients);
+                } else {
+                    alert(`Error loading domains: ${data.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                alert(`Error loading domains from database: ${error.message}`);
+            }
+        }
+        
+        function displayDomainsTable(domains, clients) {
+            // Show the domains view
+            document.getElementById('domains-view').style.display = 'block';
+            
+            const tbody = document.getElementById('domains-tbody');
+            const summary = document.getElementById('domains-summary');
+            
+            if (!tbody) {
+                // Create domains table if it doesn't exist
+                const domainsCard = document.querySelector('#domains-view') || createDomainsCard();
+            }
+            
+            // Clear existing content
+            if (tbody) tbody.innerHTML = '';
+            
+            // Update summary
+            const totalDomains = domains.length;
+            const domainsWithRedirects = domains.filter(d => d.redirections && d.redirections.length > 0).length;
+            
+            if (summary) {
+                summary.innerHTML = `
+                    <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <div><strong>Total Domains:</strong> ${totalDomains}</div>
+                        <div><strong>Domains with Redirects:</strong> ${domainsWithRedirects}</div>
+                    </div>
+                `;
+            }
+            
+            // Add domains to table
+            domains.forEach((domain, index) => {
+                if (domain.redirections && domain.redirections.length > 0) {
+                    domain.redirections.forEach((redirect, redirectIndex) => {
+                        createDomainTableRow(domain, redirect, redirectIndex);
+                    });
+                } else {
+                    createDomainTableRow(domain, null, 0);
+                }
+            });
+        }
+        
+        function createDomainTableRow(domain, redirect, redirectIndex) {
+            const tbody = document.getElementById('domains-tbody');
+            if (!tbody) return;
+            
+            const row = tbody.insertRow();
+            row.className = 'domain-row';
+            
+            // Domain number and name
+            const domainCell = row.insertCell(0);
+            domainCell.innerHTML = `
+                <div><strong>#${domain.domain_number || 'N/A'}</strong> ${domain.domain_name}</div>
+                <small style="color: #64748b;">Client: ${domain.client_name || 'Unassigned'}</small>
+            `;
+            
+            // Redirect target
+            const redirectCell = row.insertCell(1);
+            if (redirect) {
+                redirectCell.innerHTML = `
+                    <div>${redirect.name} → ${redirect.target}</div>
+                    <small style="color: #64748b;">${redirect.type}</small>
+                `;
+            } else {
+                redirectCell.innerHTML = '<span class="no-redirect">No redirections</span>';
+            }
+            
+            // Actions
+            const actionCell = row.insertCell(2);
+            actionCell.innerHTML = `
+                <button class="btn btn-small" onclick="editDomain('${domain.domain_name}')">Edit</button>
+            `;
+        }
+        
+        function createDomainsCard() {
+            const container = document.querySelector('.container');
+            const domainsCard = document.createElement('div');
+            domainsCard.className = 'card';
+            domainsCard.id = 'domains-view';
+            domainsCard.innerHTML = `
+                <h2>All Domains with URL Redirections</h2>
+                <div id="domains-summary"></div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Domain</th>
+                            <th>Redirects To</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="domains-tbody"></tbody>
+                </table>
+            `;
+            container.appendChild(domainsCard);
+            return domainsCard;
+        }
+        
+        function showBulkUpdateModal() {
+            alert('Bulk Update functionality - Coming soon! This will allow you to update multiple domain redirections at once.');
+        }
+        
+        function showClientModal() {
+            alert('Client Management functionality - Coming soon! This will allow you to add/edit clients and assign domains to them.');
+        }
+        
+        function exportRedirections() {
+            alert('Export to CSV functionality - Coming soon! This will export all domain redirections to a CSV file.');
+        }
+        
+        function editDomain(domainName) {
+            alert(`Edit domain: ${domainName} - Coming soon! This will allow you to edit redirections for this domain.`);
+        }
+        
+        // Auto-load domains from database when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDomainsFromDB();
+        });
     </script>
 </body>
 </html>
@@ -742,22 +873,43 @@ def sync_all_domains():
         if not namecheap_domains:
             return jsonify({"error": "No domains found in Namecheap"}), 404
         
-        # Sync domains to database
+        # Sync domains to database with redirections
         domains_added = 0
         domains_updated = 0
         
-        for domain_name in namecheap_domains:
+        print(f"🔄 Starting to sync {len(namecheap_domains)} domains with redirections...")
+        
+        for i, domain_name in enumerate(namecheap_domains[:50], 1):  # Limit to first 50 for now to avoid timeout
             try:
+                print(f"Processing {i}/{min(50, len(namecheap_domains))}: {domain_name}")
+                
                 # Check if domain exists
                 existing_domain_id = db.get_domain_id(domain_name)
                 
                 if existing_domain_id:
                     # Domain exists, just update timestamp
+                    domain_number = db.add_or_update_domain(domain_name)
                     domains_updated += 1
                 else:
                     # New domain, add it
-                    db.add_or_update_domain(domain_name)
+                    domain_number = db.add_or_update_domain(domain_name)
                     domains_added += 1
+                
+                # Get redirections for this domain
+                try:
+                    redirections = email_manager.api_client.get_domain_redirections(domain_name)
+                    if redirections:
+                        db.update_redirections(domain_name, redirections)
+                        print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
+                    else:
+                        print(f"  ℹ️ No redirections found for {domain_name}")
+                except Exception as redirect_error:
+                    print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
+                
+                # Add small delay to avoid rate limiting
+                if i % 10 == 0:  # Every 10 domains
+                    import time
+                    time.sleep(1)
                     
             except Exception as e:
                 print(f"Error syncing domain {domain_name}: {e}")
@@ -767,12 +919,15 @@ def sync_all_domains():
         all_domains_in_db = db.get_all_domains_with_redirections()
         total_in_db = len(all_domains_in_db)
         
+        processed_count = min(50, len(namecheap_domains))
+        
         return jsonify({
             "status": "completed",
-            "domains_synced": len(namecheap_domains),
+            "domains_synced": processed_count,
             "domains_added": domains_added,
             "domains_updated": domains_updated,
-            "total_in_db": total_in_db
+            "total_in_db": total_in_db,
+            "note": f"Processed first {processed_count} domains (limited for performance)"
         })
         
     except Exception as e:
