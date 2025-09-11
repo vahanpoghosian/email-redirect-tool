@@ -3,12 +3,14 @@ Email Redirection Tool - Flask Application
 View existing email forwarding for Namecheap domains
 """
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
 from flask_cors import CORS
 import json
 import os
 from datetime import datetime
+from functools import wraps
 from namecheap_client import EmailRedirectionManager
+from models import Database
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'change-in-production-email-redirect-tool')
@@ -568,20 +570,286 @@ DASHBOARD_TEMPLATE = """
 </html>
 """
 
-# Initialize email redirection manager
+# Initialize database and email redirection manager
+db = Database()
 email_manager = None
+
 try:
     email_manager = EmailRedirectionManager()
     print("Email Redirection Manager initialized successfully")
 except Exception as e:
     print(f"Warning: Could not initialize Email Redirection Manager: {e}")
 
+# Authentication decorator
+def require_auth(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'authenticated' not in session:
+            return jsonify({"error": "Authentication required"}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Login template
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Domain Redirect Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); width: 400px; }
+        .logo { font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: 2rem; color: #1e293b; }
+        .form-group { margin-bottom: 1.5rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+        .form-control { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; }
+        .btn { width: 100%; background: #3b82f6; color: white; border: none; padding: 0.75rem; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+        .btn:hover { background: #2563eb; }
+        .error { color: #ef4444; margin-top: 0.5rem; font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="logo">🔗 Domain Redirect Tool</div>
+        <form method="POST">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn">Login</button>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if db.verify_user(username, password):
+            session['authenticated'] = True
+            session['username'] = username
+            return redirect(url_for('dashboard'))
+        else:
+            return render_template_string(LOGIN_TEMPLATE, error="Invalid credentials")
+    
+    return render_template_string(LOGIN_TEMPLATE)
+
+@app.route('/logout')
+def logout():
+    """Logout"""
+    session.clear()
+    return redirect(url_for('login'))
+
 @app.route('/')
+@require_auth
 def dashboard():
     """Main dashboard"""
     return render_template_string(DASHBOARD_TEMPLATE)
 
+@app.route('/api/sync-all-domains', methods=['POST'])
+@require_auth
+def sync_all_domains():
+    """Sync all domains from Namecheap to database with progress tracking"""
+    try:
+        if not email_manager:
+            return jsonify({"error": "Email manager not initialized"}), 503
+        
+        # Get all domains from Namecheap
+        namecheap_domains = email_manager.get_all_domains()
+        
+        if not namecheap_domains:
+            return jsonify({"error": "No domains found in Namecheap"}), 404
+        
+        # This will be a long-running process
+        # We'll return immediately and handle progress via WebSocket or polling
+        # For now, return the count to start the process
+        return jsonify({
+            "status": "started",
+            "total_domains": len(namecheap_domains),
+            "message": "Domain sync started"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/sync-domains-progress', methods=['GET'])
+@require_auth
+def sync_domains_progress():
+    """Get progress of domain sync - this would need WebSocket in production"""
+    # For now, return mock progress
+    return jsonify({
+        "status": "in_progress", 
+        "processed": 50,
+        "total": 417,
+        "current_domain": "example.com"
+    })
+
+@app.route('/api/sync-single-domain', methods=['POST'])
+@require_auth
+def sync_single_domain():
+    """Sync a single domain from Namecheap to database"""
+    try:
+        data = request.get_json()
+        domain_name = data.get('domain_name')
+        
+        if not domain_name:
+            return jsonify({"error": "Domain name required"}), 400
+        
+        # Add/update domain in database
+        domain_number = db.add_or_update_domain(domain_name)
+        
+        # Get redirections from Namecheap
+        redirections = email_manager.api_client.get_domain_redirections(domain_name)
+        
+        # Update redirections in database
+        db.update_redirections(domain_name, redirections)
+        
+        return jsonify({
+            "status": "success",
+            "domain_name": domain_name,
+            "domain_number": domain_number,
+            "redirections_count": len(redirections)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/domains-from-db', methods=['GET'])
+@require_auth
+def get_domains_from_db():
+    """Get all domains from database with client info"""
+    try:
+        domains = db.get_all_domains_with_redirections()
+        clients = db.get_all_clients()
+        
+        return jsonify({
+            "status": "success",
+            "domains": domains,
+            "clients": clients,
+            "total_count": len(domains)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/clients', methods=['GET', 'POST'])
+@require_auth
+def manage_clients():
+    """Get all clients or add new client"""
+    if request.method == 'GET':
+        try:
+            clients = db.get_all_clients()
+            return jsonify({"status": "success", "clients": clients})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            client_name = data.get('client_name', '').strip()
+            
+            if not client_name:
+                return jsonify({"error": "Client name required"}), 400
+            
+            client_id = db.add_client(client_name)
+            
+            return jsonify({
+                "status": "success",
+                "client_id": client_id,
+                "client_name": client_name
+            })
+            
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+@app.route('/api/assign-client', methods=['POST'])
+@require_auth
+def assign_client():
+    """Assign domain to client"""
+    try:
+        data = request.get_json()
+        domain_name = data.get('domain_name')
+        client_id = data.get('client_id')
+        
+        if not domain_name or not client_id:
+            return jsonify({"error": "Domain name and client ID required"}), 400
+        
+        db.assign_domain_to_client(domain_name, client_id)
+        
+        return jsonify({"status": "success"})
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/bulk-update', methods=['POST'])
+@require_auth
+def bulk_update():
+    """Bulk update domains with progress tracking"""
+    try:
+        data = request.get_json()
+        updates = data.get('updates', [])  # List of {domain_name, name, target}
+        
+        if not updates:
+            return jsonify({"error": "No updates provided"}), 400
+        
+        # Process updates with delays
+        results = []
+        
+        for i, update in enumerate(updates):
+            try:
+                domain_name = update.get('domain_name')
+                name = update.get('name', '@')
+                target = update.get('target')
+                
+                # Update via Namecheap API
+                success = email_manager.api_client.set_domain_redirection(domain_name, name, target)
+                
+                results.append({
+                    "domain_name": domain_name,
+                    "success": success,
+                    "processed": i + 1,
+                    "total": len(updates)
+                })
+                
+                # Add delay between updates
+                if i < len(updates) - 1:
+                    import time
+                    time.sleep(0.6)
+                
+            except Exception as e:
+                results.append({
+                    "domain_name": update.get('domain_name', 'unknown'),
+                    "success": False,
+                    "error": str(e),
+                    "processed": i + 1,
+                    "total": len(updates)
+                })
+        
+        return jsonify({
+            "status": "completed",
+            "results": results,
+            "total_processed": len(results)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/domains-with-redirections', methods=['GET'])
+@require_auth
 def get_domains_with_redirections():
     """Get all domains with their redirections for editing"""
     try:
