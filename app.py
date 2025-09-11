@@ -742,13 +742,37 @@ def sync_all_domains():
         if not namecheap_domains:
             return jsonify({"error": "No domains found in Namecheap"}), 404
         
-        # This will be a long-running process
-        # We'll return immediately and handle progress via WebSocket or polling
-        # For now, return the count to start the process
+        # Sync domains to database
+        domains_added = 0
+        domains_updated = 0
+        
+        for domain_name in namecheap_domains:
+            try:
+                # Check if domain exists
+                existing_domain_id = db.get_domain_id(domain_name)
+                
+                if existing_domain_id:
+                    # Domain exists, just update timestamp
+                    domains_updated += 1
+                else:
+                    # New domain, add it
+                    db.add_or_update_domain(domain_name)
+                    domains_added += 1
+                    
+            except Exception as e:
+                print(f"Error syncing domain {domain_name}: {e}")
+                continue
+        
+        # Get total count in database
+        all_domains_in_db = db.get_all_domains_with_redirections()
+        total_in_db = len(all_domains_in_db)
+        
         return jsonify({
-            "status": "started",
-            "total_domains": len(namecheap_domains),
-            "message": "Domain sync started"
+            "status": "completed",
+            "domains_synced": len(namecheap_domains),
+            "domains_added": domains_added,
+            "domains_updated": domains_updated,
+            "total_in_db": total_in_db
         })
         
     except Exception as e:
