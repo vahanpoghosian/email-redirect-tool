@@ -356,13 +356,25 @@ class NamecheapAPIClient:
         """Get domain URL redirections for a domain"""
         try:
             # Split domain into SLD and TLD as required by Namecheap API
+            # For domains like example.com -> SLD=example, TLD=com
+            # For domains like example.co.uk -> SLD=example, TLD=co.uk
             domain_parts = domain.split('.')
             if len(domain_parts) < 2:
                 print(f"❌ Invalid domain format: {domain}")
                 return []
             
-            sld = '.'.join(domain_parts[:-1])  # Everything except the last part
-            tld = domain_parts[-1]  # Last part is TLD
+            # Handle common multi-part TLDs
+            common_tlds = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'net.nz', 'org.nz']
+            
+            sld = domain_parts[0]  # First part is always SLD
+            tld = '.'.join(domain_parts[1:])  # Rest is TLD
+            
+            # For multi-part TLDs, adjust accordingly
+            for common_tld in common_tlds:
+                if domain.endswith('.' + common_tld):
+                    sld = domain.replace('.' + common_tld, '')
+                    tld = common_tld
+                    break
             
             print(f"🔍 Getting DNS records for {domain} (SLD: {sld}, TLD: {tld})")
             
@@ -508,8 +520,18 @@ class NamecheapAPIClient:
                 print(f"❌ Invalid domain format: {domain}")
                 return False
             
-            sld = '.'.join(domain_parts[:-1])
-            tld = domain_parts[-1]
+            # Handle common multi-part TLDs
+            common_tlds = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'net.nz', 'org.nz']
+            
+            sld = domain_parts[0]  # First part is always SLD
+            tld = '.'.join(domain_parts[1:])  # Rest is TLD
+            
+            # For multi-part TLDs, adjust accordingly
+            for common_tld in common_tlds:
+                if domain.endswith('.' + common_tld):
+                    sld = domain.replace('.' + common_tld, '')
+                    tld = common_tld
+                    break
             
             # Build parameters for setHosts
             params = {'SLD': sld, 'TLD': tld}
@@ -573,8 +595,18 @@ class NamecheapAPIClient:
                 print(f"❌ Invalid domain format: {domain}")
                 return []
             
-            sld = '.'.join(domain_parts[:-1])
-            tld = domain_parts[-1]
+            # Handle common multi-part TLDs
+            common_tlds = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'net.nz', 'org.nz']
+            
+            sld = domain_parts[0]  # First part is always SLD
+            tld = '.'.join(domain_parts[1:])  # Rest is TLD
+            
+            # For multi-part TLDs, adjust accordingly
+            for common_tld in common_tlds:
+                if domain.endswith('.' + common_tld):
+                    sld = domain.replace('.' + common_tld, '')
+                    tld = common_tld
+                    break
             
             response = self._make_request(
                 'namecheap.domains.dns.getHosts',
