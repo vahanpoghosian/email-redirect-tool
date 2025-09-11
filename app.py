@@ -51,19 +51,19 @@ DASHBOARD_TEMPLATE = """
 </head>
 <body>
     <div class="header">
-        <div class="logo">🔍 Domain Email Redirections Viewer</div>
+        <div class="logo">🔗 Domain URL Redirections Viewer</div>
     </div>
     
     <div class="container">
         <div class="card">
-            <h1>Domain Email Redirection Viewer</h1>
-            <p>View existing email forwarding for all your domains using Namecheap API</p>
+            <h1>Domain URL Redirection Viewer</h1>
+            <p>View existing domain redirections (URL forwarding) for all your domains using Namecheap API</p>
         </div>
         
         <div class="card">
             <h2>Load Domain Redirections</h2>
             <div style="margin-bottom: 1rem;">
-                <button class="btn btn-success" onclick="loadAllRedirections()">Load All Domain Redirections</button>
+                <button class="btn btn-success" onclick="loadAllRedirections()">Load All Domain URL Redirections</button>
                 <button class="btn" onclick="exportRedirections()">Export to CSV</button>
             </div>
             
@@ -76,18 +76,18 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card" id="redirections-view">
-            <h2>Domain Email Redirections</h2>
+            <h2>Domain URL Redirections</h2>
             <div id="redirections-summary"></div>
             
             <div style="margin: 1rem 0;">
                 <label>Group by:</label>
                 <select class="form-control" id="group-filter" onchange="updateGrouping()" style="width: auto;">
-                    <option value="target">Target Email</option>
+                    <option value="target">Target URL</option>
                     <option value="domain">Domain</option>
-                    <option value="alias">Email Alias</option>
+                    <option value="type">Redirect Type</option>
                 </select>
                 
-                <input type="text" class="form-control" id="search-filter" placeholder="Search domains or emails..." onkeyup="filterResults()" style="width: 300px;">
+                <input type="text" class="form-control" id="search-filter" placeholder="Search domains or URLs..." onkeyup="filterResults()" style="width: 300px;">
             </div>
             
             <div id="grouped-redirections"></div>
@@ -99,8 +99,8 @@ DASHBOARD_TEMPLATE = """
                 <thead>
                     <tr>
                         <th>Domain</th>
-                        <th>Email Alias</th>
-                        <th>Redirects To</th>
+                        <th>Redirect Type</th>
+                        <th>Target URL</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -159,7 +159,7 @@ DASHBOARD_TEMPLATE = """
             allRedirections.forEach(redirect => {
                 const row = tbody.insertRow();
                 row.insertCell(0).textContent = redirect.domain;
-                row.insertCell(1).textContent = redirect.alias;
+                row.insertCell(1).textContent = redirect.type;
                 row.insertCell(2).textContent = redirect.target;
                 row.insertCell(3).innerHTML = redirect.status === 'active' ? 
                     '<span class="status-success">Active</span>' : 
@@ -185,8 +185,8 @@ DASHBOARD_TEMPLATE = """
                     case 'domain':
                         key = redirect.domain;
                         break;
-                    case 'alias':
-                        key = redirect.alias;
+                    case 'type':
+                        key = redirect.type;
                         break;
                 }
                 
@@ -202,7 +202,7 @@ DASHBOARD_TEMPLATE = """
                 html += `
                     <div class="group-card">
                         <div class="group-header">
-                            <h3>${groupBy === 'target' ? '📧' : groupBy === 'domain' ? '🌐' : '📮'} ${group}</h3>
+                            <h3>${groupBy === 'target' ? '🔗' : groupBy === 'domain' ? '🌐' : '📋'} ${group}</h3>
                             <span class="group-count">${redirects.length} ${redirects.length === 1 ? 'redirect' : 'redirects'}</span>
                         </div>
                         <div>
@@ -211,11 +211,11 @@ DASHBOARD_TEMPLATE = """
                 redirects.forEach(redirect => {
                     if (groupBy === 'target') {
                         html += `<div class="redirect-item">
-                            <strong>${redirect.domain}</strong> → ${redirect.alias}@${redirect.domain}
+                            <strong>${redirect.domain}</strong> → ${redirect.target}
                         </div>`;
                     } else if (groupBy === 'domain') {
                         html += `<div class="redirect-item">
-                            ${redirect.alias}@${redirect.domain} → <strong>${redirect.target}</strong>
+                            ${redirect.type}: <strong>${redirect.target}</strong>
                         </div>`;
                     } else {
                         html += `<div class="redirect-item">
@@ -246,10 +246,10 @@ DASHBOARD_TEMPLATE = """
                 return;
             }
             
-            let csv = 'Domain,Email Alias,Redirects To,Status\\n';
+            let csv = 'Domain,Redirect Type,Target URL,Status\\n';
             
             allRedirections.forEach(redirect => {
-                csv += `${redirect.domain},${redirect.alias},${redirect.target},${redirect.status}\\n`;
+                csv += `${redirect.domain},${redirect.type},${redirect.target},${redirect.status}\\n`;
             });
             
             const blob = new Blob([csv], { type: 'text/csv' });
@@ -282,7 +282,7 @@ def dashboard():
 
 @app.route('/api/all-redirections', methods=['GET'])
 def get_all_redirections():
-    """Get all email redirections from all domains"""
+    """Get all domain URL redirections from all domains"""
     try:
         if not email_manager:
             return jsonify({
@@ -317,24 +317,24 @@ def get_all_redirections():
                 }
             }), 404
         
-        # Get redirections for each domain
+        # Get URL redirections for each domain
         all_redirections = []
         processed = 0
         
         for domain in domains:
             try:
-                redirections = email_manager.api_client.get_email_forwarding(domain)
+                redirections = email_manager.api_client.get_domain_redirections(domain)
                 
                 for redirect in redirections:
                     all_redirections.append({
                         'domain': domain,
-                        'alias': redirect['from'],
-                        'target': redirect['to'],
+                        'type': redirect['type'],
+                        'target': redirect['target'],
                         'status': 'active'  # Assume active if returned by API
                     })
                 
                 processed += 1
-                print(f"Processed {processed}/{len(domains)}: {domain} - {len(redirections)} redirections")
+                print(f"Processed {processed}/{len(domains)}: {domain} - {len(redirections)} URL redirections")
                 
             except Exception as e:
                 print(f"Error processing domain {domain}: {e}")

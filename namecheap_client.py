@@ -311,6 +311,74 @@ class NamecheapAPIClient:
             print(f"Error getting email forwarding for {domain}: {e}")
             return []
     
+    def get_domain_redirections(self, domain: str) -> List[Dict]:
+        """Get domain URL redirections for a domain"""
+        try:
+            response = self._make_request(
+                'namecheap.domains.dns.getHosts',
+                DomainName=domain
+            )
+            
+            # Navigate to domain redirections data - handle namespaced keys
+            redirections = []
+            
+            # Find CommandResponse (may be namespaced)
+            command_response = None
+            for key, value in response.items():
+                if 'CommandResponse' in key:
+                    command_response = value
+                    break
+            
+            if not command_response:
+                print(f"❌ No CommandResponse found for {domain}")
+                return []
+            
+            # Find DomainDNSGetHostsResult
+            hosts_result = None
+            for key, value in command_response.items():
+                if 'DomainDNSGetHostsResult' in key:
+                    hosts_result = value
+                    break
+            
+            if not hosts_result:
+                print(f"❌ No DomainDNSGetHostsResult found for {domain}")
+                return []
+            
+            # Find Host data (may be namespaced or direct)
+            host_data = None
+            for key, value in hosts_result.items():
+                if 'Host' in key or key == 'Host':
+                    host_data = value
+                    break
+            
+            if not host_data:
+                print(f"No Host data found for {domain}")
+                return []
+            
+            # Handle single host or list of hosts
+            if isinstance(host_data, dict):
+                host_data = [host_data]
+            
+            print(f"🔗 Processing {len(host_data)} host records for {domain}")
+            
+            # Look for URL redirections (Type='URL')
+            for host in host_data:
+                if isinstance(host, dict):
+                    host_type = host.get('Type', '')
+                    if host_type == 'URL':
+                        redirections.append({
+                            'type': 'URL Redirect',
+                            'target': host.get('Address', ''),
+                            'name': host.get('Name', '@')
+                        })
+            
+            print(f"Retrieved {len(redirections)} URL redirections for {domain}")
+            return redirections
+            
+        except Exception as e:
+            print(f"Error getting domain redirections for {domain}: {e}")
+            return []
+    
     def set_email_forwarding(self, domain: str, forwarding_rules: List[Dict]) -> bool:
         """
         Set email forwarding for a domain
