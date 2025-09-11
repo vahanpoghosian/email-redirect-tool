@@ -294,30 +294,28 @@ class NamecheapAPIClient:
         """Get ALL domains by fetching all pages"""
         all_domains = []
         page = 1
-        page_size = 100
+        page_size = 100  # Request 100 per page, but Namecheap might limit to 20
         
         while True:
-            print(f"🔄 Fetching domains page {page}...")
+            print(f"🔄 Fetching domains page {page} (requesting {page_size} per page)...")
             page_domains = self.get_domain_list(page, page_size)
             
             if not page_domains:
-                print(f"✅ Finished fetching domains. Total: {len(all_domains)}")
+                print(f"✅ No more domains on page {page}. Total: {len(all_domains)}")
                 break
                 
+            print(f"📄 Got {len(page_domains)} domains on page {page}")
             all_domains.extend(page_domains)
             
-            # If we got fewer domains than page_size, we're done
-            if len(page_domains) < page_size:
-                print(f"✅ Finished fetching domains. Total: {len(all_domains)}")
-                break
-                
+            # Continue to next page regardless of count (Namecheap might limit to 20)
             page += 1
             
             # Safety check to avoid infinite loops
-            if page > 50:  # Max 5000 domains
-                print(f"⚠️ Reached maximum page limit. Total domains: {len(all_domains)}")
+            if page > 100:  # Allow more pages for large accounts
+                print(f"⚠️ Reached maximum page limit ({page-1} pages). Total domains: {len(all_domains)}")
                 break
         
+        print(f"✅ Domain fetching complete. Total domains retrieved: {len(all_domains)}")
         return all_domains
     
     def get_email_forwarding(self, domain: str) -> List[Dict]:
@@ -357,9 +355,21 @@ class NamecheapAPIClient:
     def get_domain_redirections(self, domain: str) -> List[Dict]:
         """Get domain URL redirections for a domain"""
         try:
+            # Split domain into SLD and TLD as required by Namecheap API
+            domain_parts = domain.split('.')
+            if len(domain_parts) < 2:
+                print(f"❌ Invalid domain format: {domain}")
+                return []
+            
+            sld = '.'.join(domain_parts[:-1])  # Everything except the last part
+            tld = domain_parts[-1]  # Last part is TLD
+            
+            print(f"🔍 Getting DNS records for {domain} (SLD: {sld}, TLD: {tld})")
+            
             response = self._make_request(
                 'namecheap.domains.dns.getHosts',
-                DomainName=domain
+                SLD=sld,
+                TLD=tld
             )
             
             # Navigate to domain redirections data - handle namespaced keys
@@ -404,16 +414,24 @@ class NamecheapAPIClient:
             
             print(f"🔗 Processing {len(host_data)} host records for {domain}")
             
-            # Look for URL redirections (Type='URL')
+            # Look for URL redirections (Type='URL' or 'URL301' or 'URL302')
             for host in host_data:
                 if isinstance(host, dict):
-                    host_type = host.get('Type', '')
-                    if host_type == 'URL':
+                    host_type = host.get('Type', '').upper()
+                    host_name = host.get('Name', '@')
+                    host_address = host.get('Address', '')
+                    
+                    print(f"  📋 Host record: {host_name} -> {host_type} -> {host_address}")
+                    
+                    # Check for URL redirect types
+                    if host_type in ['URL', 'URL301', 'URL302', 'REDIRECT']:
+                        redirect_type = 'URL Redirect (301)' if host_type == 'URL301' else 'URL Redirect'
                         redirections.append({
-                            'type': 'URL Redirect',
-                            'target': host.get('Address', ''),
-                            'name': host.get('Name', '@')
+                            'type': redirect_type,
+                            'target': host_address,
+                            'name': host_name
                         })
+                        print(f"  ✅ Found redirect: {host_name} -> {host_address}")
             
             print(f"Retrieved {len(redirections)} URL redirections for {domain}")
             return redirections
@@ -484,8 +502,17 @@ class NamecheapAPIClient:
                 'TTL': '300'
             }
             
+            # Split domain into SLD and TLD for setHosts
+            domain_parts = domain.split('.')
+            if len(domain_parts) < 2:
+                print(f"❌ Invalid domain format: {domain}")
+                return False
+            
+            sld = '.'.join(domain_parts[:-1])
+            tld = domain_parts[-1]
+            
             # Build parameters for setHosts
-            params = {'DomainName': domain}
+            params = {'SLD': sld, 'TLD': tld}
             
             # Add existing hosts
             for i, host in enumerate(hosts_to_keep, 1):
@@ -540,9 +567,19 @@ class NamecheapAPIClient:
     def _get_all_hosts(self, domain: str) -> List[Dict]:
         """Get all DNS host records for a domain"""
         try:
+            # Split domain into SLD and TLD as required by Namecheap API
+            domain_parts = domain.split('.')
+            if len(domain_parts) < 2:
+                print(f"❌ Invalid domain format: {domain}")
+                return []
+            
+            sld = '.'.join(domain_parts[:-1])
+            tld = domain_parts[-1]
+            
             response = self._make_request(
                 'namecheap.domains.dns.getHosts',
-                DomainName=domain
+                SLD=sld,
+                TLD=tld
             )
             
             hosts = []
