@@ -579,6 +579,60 @@ DASHBOARD_TEMPLATE = """
             a.click();
             window.URL.revokeObjectURL(url);
         }
+        
+        async function syncAllDomainsFromNamecheap() {
+            try {
+                // Show progress bar
+                const progressDiv = document.getElementById('sync-progress');
+                const progressFill = document.getElementById('sync-progress-fill');
+                const progressText = document.getElementById('sync-progress-text');
+                const statusDiv = document.getElementById('sync-status');
+                
+                progressDiv.style.display = 'block';
+                progressFill.style.width = '0%';
+                progressText.textContent = 'Starting sync from Namecheap...';
+                statusDiv.innerHTML = '';
+                
+                // Start the sync
+                const response = await fetch('/api/sync-all-domains', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.error) {
+                    progressText.textContent = `Error: ${result.error}`;
+                    progressFill.style.background = '#ef4444';
+                    return;
+                }
+                
+                // Update progress
+                progressFill.style.width = '100%';
+                progressText.textContent = `Sync completed! Processed ${result.domains_synced} domains.`;
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 1rem;">
+                        <div><strong>Domains Added:</strong> ${result.domains_added}</div>
+                        <div><strong>Domains Updated:</strong> ${result.domains_updated}</div>
+                        <div><strong>Total in Database:</strong> ${result.total_in_db}</div>
+                    </div>
+                `;
+                
+                // Hide progress after delay
+                setTimeout(() => {
+                    progressDiv.style.display = 'none';
+                }, 3000);
+                
+            } catch (error) {
+                const progressText = document.getElementById('sync-progress-text');
+                const progressFill = document.getElementById('sync-progress-fill');
+                progressText.textContent = `Error: ${error.message}`;
+                progressFill.style.background = '#ef4444';
+                console.error('Sync error:', error);
+            }
+        }
     </script>
 </body>
 </html>
