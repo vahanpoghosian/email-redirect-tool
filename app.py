@@ -290,13 +290,31 @@ def get_all_redirections():
                 "message": "Email manager not initialized. Check API credentials."
             }), 503
         
+        # Test API connection first
+        connection_test = email_manager.api_client.test_connection()
+        if not connection_test:
+            return jsonify({
+                "status": "error",
+                "message": "Namecheap API connection failed. Check credentials and IP whitelist.",
+                "debug_info": {
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip,
+                    "api_key_present": bool(email_manager.api_client.api_key)
+                }
+            }), 503
+        
         # Get all domains
         domains = email_manager.get_all_domains()
         
         if not domains:
             return jsonify({
                 "status": "error", 
-                "message": "No domains found. Check Namecheap API connection."
+                "message": "No domains found in your Namecheap account or API connection issue.",
+                "debug_info": {
+                    "connection_test": connection_test,
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip
+                }
             }), 404
         
         # Get redirections for each domain
@@ -360,6 +378,47 @@ def get_domains():
             "status": "error",
             "message": f"Failed to retrieve domains: {str(e)}"
         }), 500
+
+@app.route('/api/debug', methods=['GET'])
+def debug_api():
+    """Debug Namecheap API connection"""
+    try:
+        if not email_manager:
+            return jsonify({
+                "status": "error",
+                "message": "Email manager not initialized",
+                "env_vars": {
+                    "NAMECHEAP_API_USER": bool(os.environ.get('NAMECHEAP_API_USER')),
+                    "NAMECHEAP_API_KEY": bool(os.environ.get('NAMECHEAP_API_KEY')),
+                    "NAMECHEAP_CLIENT_IP": os.environ.get('NAMECHEAP_CLIENT_IP', 'Missing')
+                }
+            })
+        
+        # Test connection
+        connection_test = email_manager.api_client.test_connection()
+        
+        # Try to get domains
+        domains = email_manager.get_all_domains()
+        
+        return jsonify({
+            "status": "debug",
+            "connection_test": connection_test,
+            "api_credentials": {
+                "api_user": email_manager.api_client.api_user,
+                "client_ip": email_manager.api_client.client_ip,
+                "api_key_length": len(email_manager.api_client.api_key) if email_manager.api_client.api_key else 0
+            },
+            "domains_found": len(domains),
+            "sample_domains": domains[:3] if domains else [],
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        })
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
