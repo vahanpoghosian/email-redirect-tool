@@ -423,6 +423,126 @@ class NamecheapAPIClient:
         except Exception as e:
             print(f"❌ Error setting email forwarding for {domain}: {e}")
             return False
+    
+    def set_domain_redirection(self, domain: str, name: str, target: str) -> bool:
+        """Set domain URL redirection for a domain"""
+        try:
+            # First get existing hosts to preserve non-URL records
+            existing_hosts = self._get_all_hosts(domain)
+            
+            # Remove existing URL redirection with same name
+            hosts_to_keep = [h for h in existing_hosts if not (h.get('Type') == 'URL' and h.get('Name') == name)]
+            
+            # Add the new redirection
+            new_host = {
+                'HostName': name,
+                'RecordType': 'URL',
+                'Address': target,
+                'TTL': '300'
+            }
+            
+            # Build parameters for setHosts
+            params = {'DomainName': domain}
+            
+            # Add existing hosts
+            for i, host in enumerate(hosts_to_keep, 1):
+                params[f'HostName{i}'] = host.get('Name', '@')
+                params[f'RecordType{i}'] = host.get('Type', 'A')
+                params[f'Address{i}'] = host.get('Address', '')
+                params[f'TTL{i}'] = host.get('TTL', '1800')
+                if host.get('MXPref'):
+                    params[f'MXPref{i}'] = host.get('MXPref')
+            
+            # Add the new redirection
+            next_index = len(hosts_to_keep) + 1
+            params[f'HostName{next_index}'] = name
+            params[f'RecordType{next_index}'] = 'URL'
+            params[f'Address{next_index}'] = target
+            params[f'TTL{next_index}'] = '300'
+            
+            print(f"Setting URL redirection for {domain}: {name} -> {target}")
+            
+            response = self._make_request('namecheap.domains.dns.setHosts', **params)
+            
+            # Check if successful
+            command_response = None
+            for key, value in response.items():
+                if 'CommandResponse' in key:
+                    command_response = value
+                    break
+            
+            if command_response:
+                hosts_result = None
+                for key, value in command_response.items():
+                    if 'DomainDNSSetHostsResult' in key:
+                        hosts_result = value
+                        break
+                
+                if hosts_result:
+                    is_success = hosts_result.get('IsSuccess') == 'true'
+                    if is_success:
+                        print(f"✅ Successfully set URL redirection for {domain}")
+                        return True
+                    else:
+                        print(f"❌ Failed to set URL redirection for {domain}: {hosts_result}")
+                        return False
+            
+            print(f"❌ Unexpected response format for {domain}")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Error setting domain redirection for {domain}: {e}")
+            return False
+    
+    def _get_all_hosts(self, domain: str) -> List[Dict]:
+        """Get all DNS host records for a domain"""
+        try:
+            response = self._make_request(
+                'namecheap.domains.dns.getHosts',
+                DomainName=domain
+            )
+            
+            hosts = []
+            
+            # Find CommandResponse (may be namespaced)
+            command_response = None
+            for key, value in response.items():
+                if 'CommandResponse' in key:
+                    command_response = value
+                    break
+            
+            if not command_response:
+                return []
+            
+            # Find DomainDNSGetHostsResult
+            hosts_result = None
+            for key, value in command_response.items():
+                if 'DomainDNSGetHostsResult' in key:
+                    hosts_result = value
+                    break
+            
+            if not hosts_result:
+                return []
+            
+            # Find Host data (may be namespaced or direct)
+            host_data = None
+            for key, value in hosts_result.items():
+                if 'Host' in key or key == 'Host':
+                    host_data = value
+                    break
+            
+            if not host_data:
+                return []
+            
+            # Handle single host or list of hosts
+            if isinstance(host_data, dict):
+                host_data = [host_data]
+            
+            return host_data
+            
+        except Exception as e:
+            print(f"Error getting all hosts for {domain}: {e}")
+            return []
 
 class EmailRedirectionManager:
     """Manager for bulk email redirection operations"""

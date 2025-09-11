@@ -46,7 +46,15 @@ DASHBOARD_TEMPLATE = """
         .group-header { color: #1e293b; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
         .group-count { font-size: 0.8em; color: #64748b; font-weight: normal; }
         .redirect-item { padding: 0.5rem; background: #f8fafc; border-radius: 4px; margin-bottom: 0.5rem; }
-        #loading, #redirections-view, #raw-data { display: none; }
+        .domain-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; background: white; }
+        .domain-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .domain-name { font-size: 1.2rem; font-weight: 600; color: #1e293b; }
+        .redirection-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px; }
+        .redirection-input { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; flex: 1; }
+        .btn-small { padding: 0.5rem 1rem; font-size: 0.875rem; }
+        .status-updating { color: #f59e0b; }
+        .add-redirection { margin-top: 0.5rem; }
+        #loading, #domains-view, #raw-data { display: none; }
     </style>
 </head>
 <body>
@@ -61,9 +69,9 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card">
-            <h2>Load Domain Redirections</h2>
+            <h2>Load All Domains</h2>
             <div style="margin-bottom: 1rem;">
-                <button class="btn btn-success" onclick="loadAllRedirections()">Load All Domain URL Redirections</button>
+                <button class="btn btn-success" onclick="loadAllDomains()">Load All Domains</button>
                 <button class="btn" onclick="exportRedirections()">Export to CSV</button>
             </div>
             
@@ -71,26 +79,23 @@ DASHBOARD_TEMPLATE = """
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
                 </div>
-                <p id="progress-text">Loading redirections from domains...</p>
+                <p id="progress-text">Loading domains...</p>
             </div>
         </div>
         
-        <div class="card" id="redirections-view">
-            <h2>Domain URL Redirections</h2>
-            <div id="redirections-summary"></div>
+        <div class="card" id="domains-view">
+            <h2>All Domains with Redirections</h2>
+            <div id="domains-summary"></div>
             
             <div style="margin: 1rem 0;">
-                <label>Group by:</label>
-                <select class="form-control" id="group-filter" onchange="updateGrouping()" style="width: auto;">
-                    <option value="target">Target URL</option>
-                    <option value="domain">Domain</option>
-                    <option value="type">Redirect Type</option>
-                </select>
-                
-                <input type="text" class="form-control" id="search-filter" placeholder="Search domains or URLs..." onkeyup="filterResults()" style="width: 300px;">
+                <input type="text" class="form-control" id="search-filter" placeholder="Search domains..." onkeyup="filterDomains()" style="width: 300px;">
+                <button class="btn" onclick="loadMoreDomains()" id="load-more-btn" style="display: none;">Load More Domains</button>
             </div>
             
-            <div id="grouped-redirections"></div>
+            <div id="domains-container"></div>
+            <div id="scroll-loader" style="text-align: center; padding: 1rem; display: none;">
+                <div>Loading more domains...</div>
+            </div>
         </div>
         
         <div class="card" id="raw-data">
@@ -110,31 +115,241 @@ DASHBOARD_TEMPLATE = """
     </div>
 
     <script>
+        let allDomains = [];
+        let currentPage = 0;
+        let domainsPerPage = 10;
+        let isLoading = false;
         let allRedirections = [];
         let groupedData = {};
         
-        async function loadAllRedirections() {
+        async function loadAllDomains() {
             try {
                 document.getElementById('loading').style.display = 'block';
-                document.getElementById('redirections-view').style.display = 'none';
+                document.getElementById('domains-view').style.display = 'none';
                 document.getElementById('raw-data').style.display = 'none';
                 
-                const response = await fetch('/api/all-redirections');
+                const response = await fetch('/api/domains-with-redirections');
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    allRedirections = data.redirections;
-                    displayRedirections();
-                    document.getElementById('redirections-view').style.display = 'block';
-                    document.getElementById('raw-data').style.display = 'block';
+                    allDomains = data.domains;
+                    currentPage = 0;
+                    document.getElementById('domains-container').innerHTML = '';
+                    displayDomains();
+                    document.getElementById('domains-view').style.display = 'block';
+                    setupInfiniteScroll();
                 } else {
                     alert(`Error: ${data.message}`);
                 }
             } catch (error) {
-                alert(`Error loading redirections: ${error.message}`);
+                alert(`Error loading domains: ${error.message}`);
             } finally {
                 document.getElementById('loading').style.display = 'none';
             }
+        }
+        
+        function displayDomains() {
+            const container = document.getElementById('domains-container');
+            const summary = document.getElementById('domains-summary');
+            
+            // Update summary
+            const totalDomains = allDomains.length;
+            const domainsWithRedirects = allDomains.filter(d => d.redirections.length > 0).length;
+            
+            summary.innerHTML = `
+                <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div><strong>Total Domains:</strong> ${totalDomains}</div>
+                    <div><strong>Domains with Redirects:</strong> ${domainsWithRedirects}</div>
+                </div>
+            `;
+            
+            loadMoreDomains();
+        }
+        
+        function loadMoreDomains() {
+            if (isLoading) return;
+            
+            isLoading = true;
+            const container = document.getElementById('domains-container');
+            const start = currentPage * domainsPerPage;
+            const end = Math.min(start + domainsPerPage, allDomains.length);
+            
+            for (let i = start; i < end; i++) {
+                const domain = allDomains[i];
+                const domainCard = createDomainCard(domain);
+                container.appendChild(domainCard);
+            }
+            
+            currentPage++;
+            isLoading = false;
+            
+            // Show/hide load more button
+            const loadMoreBtn = document.getElementById('load-more-btn');
+            if (end >= allDomains.length) {
+                loadMoreBtn.style.display = 'none';
+            } else {
+                loadMoreBtn.style.display = 'inline-block';
+            }
+        }
+        
+        function createDomainCard(domain) {
+            const card = document.createElement('div');
+            card.className = 'domain-card';
+            card.innerHTML = `
+                <div class="domain-header">
+                    <div class="domain-name">${domain.name}</div>
+                    <div style="font-size: 0.875rem; color: #64748b;">
+                        ${domain.redirections.length} redirect${domain.redirections.length !== 1 ? 's' : ''}
+                    </div>
+                </div>
+                <div id="redirections-${domain.name.replace(/\./g, '-')}">
+                    ${domain.redirections.map((redirect, index) => createRedirectionRow(domain.name, redirect, index)).join('')}
+                </div>
+                <div class="add-redirection">
+                    <button class="btn btn-small" onclick="addRedirection('${domain.name}')">+ Add Redirection</button>
+                </div>
+            `;
+            return card;
+        }
+        
+        function createRedirectionRow(domainName, redirect, index) {
+            const safeId = domainName.replace(/\./g, '-');
+            return `
+                <div class="redirection-row" data-index="${index}">
+                    <label style="min-width: 80px;">From:</label>
+                    <input type="text" class="redirection-input" value="${redirect.name || '@'}" 
+                           id="name-${safeId}-${index}" placeholder="@ or subdomain">
+                    <label style="min-width: 80px;">Redirect to:</label>
+                    <input type="text" class="redirection-input" value="${redirect.target}" 
+                           id="target-${safeId}-${index}" placeholder="https://example.com">
+                    <button class="btn btn-small btn-success" onclick="updateRedirection('${domainName}', ${index})">
+                        Update
+                    </button>
+                    <button class="btn btn-small" style="background: #ef4444;" onclick="removeRedirection('${domainName}', ${index})">
+                        Remove
+                    </button>
+                    <span id="status-${safeId}-${index}" class="status-updating" style="display: none;">Updating...</span>
+                </div>
+            `;
+        }
+        
+        function setupInfiniteScroll() {
+            window.addEventListener('scroll', () => {
+                if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 1000) {
+                    if (!isLoading && currentPage * domainsPerPage < allDomains.length) {
+                        loadMoreDomains();
+                    }
+                }
+            });
+        }
+        
+        async function updateRedirection(domainName, index) {
+            const safeId = domainName.replace(/\./g, '-');
+            const nameField = document.getElementById(`name-${safeId}-${index}`);
+            const targetField = document.getElementById(`target-${safeId}-${index}`);
+            const statusSpan = document.getElementById(`status-${safeId}-${index}`);
+            
+            const name = nameField.value.trim();
+            const target = targetField.value.trim();
+            
+            if (!target) {
+                alert('Please enter a target URL');
+                return;
+            }
+            
+            // Show loading status
+            statusSpan.style.display = 'inline';
+            statusSpan.textContent = 'Updating...';
+            statusSpan.className = 'status-updating';
+            
+            try {
+                const response = await fetch('/api/update-redirection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        domain: domainName,
+                        name: name,
+                        target: target
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    statusSpan.textContent = 'Updated!';
+                    statusSpan.className = 'status-success';
+                    
+                    // Update local data
+                    const domain = allDomains.find(d => d.name === domainName);
+                    if (domain && domain.redirections[index]) {
+                        domain.redirections[index].name = name;
+                        domain.redirections[index].target = target;
+                    }
+                } else {
+                    statusSpan.textContent = 'Error!';
+                    statusSpan.className = 'status-error';
+                    alert(`Update failed: ${result.message}`);
+                }
+            } catch (error) {
+                statusSpan.textContent = 'Error!';
+                statusSpan.className = 'status-error';
+                alert(`Update failed: ${error.message}`);
+            }
+            
+            // Hide status after 3 seconds
+            setTimeout(() => {
+                statusSpan.style.display = 'none';
+            }, 3000);
+        }
+        
+        function addRedirection(domainName) {
+            const domain = allDomains.find(d => d.name === domainName);
+            if (!domain) return;
+            
+            const newRedirect = { name: '@', target: '', type: 'URL Redirect' };
+            domain.redirections.push(newRedirect);
+            
+            const safeId = domainName.replace(/\./g, '-');
+            const container = document.getElementById(`redirections-${safeId}`);
+            const newRow = document.createElement('div');
+            newRow.innerHTML = createRedirectionRow(domainName, newRedirect, domain.redirections.length - 1);
+            container.appendChild(newRow.firstElementChild);
+        }
+        
+        function removeRedirection(domainName, index) {
+            if (!confirm('Remove this redirection?')) return;
+            
+            const domain = allDomains.find(d => d.name === domainName);
+            if (!domain) return;
+            
+            domain.redirections.splice(index, 1);
+            
+            // Refresh the domain card
+            const container = document.getElementById('domains-container');
+            const cards = container.children;
+            for (let card of cards) {
+                if (card.innerHTML.includes(domainName)) {
+                    card.replaceWith(createDomainCard(domain));
+                    break;
+                }
+            }
+        }
+        
+        function filterDomains() {
+            const searchTerm = document.getElementById('search-filter').value.toLowerCase();
+            const cards = document.querySelectorAll('.domain-card');
+            
+            cards.forEach(card => {
+                const text = card.textContent.toLowerCase();
+                card.style.display = text.includes(searchTerm) ? 'block' : 'none';
+            });
+        }
+        
+        async function loadAllRedirections() {
+            // Legacy function - redirect to new function
+            loadAllDomains();
         }
         
         function displayRedirections() {
@@ -279,6 +494,126 @@ except Exception as e:
 def dashboard():
     """Main dashboard"""
     return render_template_string(DASHBOARD_TEMPLATE)
+
+@app.route('/api/domains-with-redirections', methods=['GET'])
+def get_domains_with_redirections():
+    """Get all domains with their redirections for editing"""
+    try:
+        if not email_manager:
+            return jsonify({
+                "status": "error",
+                "message": "Email manager not initialized. Check API credentials."
+            }), 503
+        
+        # Test API connection first
+        connection_test = email_manager.api_client.test_connection()
+        if not connection_test:
+            return jsonify({
+                "status": "error",
+                "message": "Namecheap API connection failed. Check credentials and IP whitelist.",
+                "debug_info": {
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip,
+                    "api_key_present": bool(email_manager.api_client.api_key)
+                }
+            }), 503
+        
+        # Get all domains
+        domains = email_manager.get_all_domains()
+        
+        if not domains:
+            return jsonify({
+                "status": "error", 
+                "message": "No domains found in your Namecheap account or API connection issue.",
+                "debug_info": {
+                    "connection_test": connection_test,
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip
+                }
+            }), 404
+        
+        # Get redirections for each domain
+        domains_with_redirections = []
+        processed = 0
+        
+        for domain in domains:
+            try:
+                redirections = email_manager.api_client.get_domain_redirections(domain)
+                
+                domains_with_redirections.append({
+                    'name': domain,
+                    'redirections': redirections,
+                    'status': 'active'
+                })
+                
+                processed += 1
+                print(f"Processed {processed}/{len(domains)}: {domain} - {len(redirections)} URL redirections")
+                
+            except Exception as e:
+                print(f"Error processing domain {domain}: {e}")
+                # Add domain even if redirections failed to load
+                domains_with_redirections.append({
+                    'name': domain,
+                    'redirections': [],
+                    'status': 'error',
+                    'error': str(e)
+                })
+                continue
+        
+        return jsonify({
+            "status": "success",
+            "domains": domains_with_redirections,
+            "total_domains_processed": processed,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to retrieve domains: {str(e)}"
+        }), 500
+
+@app.route('/api/update-redirection', methods=['POST'])
+def update_redirection():
+    """Update a domain redirection"""
+    try:
+        if not email_manager:
+            return jsonify({
+                "status": "error",
+                "message": "Email manager not initialized. Check API credentials."
+            }), 503
+        
+        data = request.get_json()
+        domain = data.get('domain')
+        name = data.get('name', '@')
+        target = data.get('target')
+        
+        if not domain or not target:
+            return jsonify({
+                "status": "error",
+                "message": "Domain and target URL are required."
+            }), 400
+        
+        # Update the redirection using Namecheap API
+        success = email_manager.api_client.set_domain_redirection(domain, name, target)
+        
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": f"Successfully updated redirection for {domain}",
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to update redirection for {domain}"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to update redirection: {str(e)}"
+        }), 500
 
 @app.route('/api/all-redirections', methods=['GET'])
 def get_all_redirections():
