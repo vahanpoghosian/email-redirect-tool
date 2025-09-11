@@ -13,6 +13,8 @@ services:
         value: YOUR_NAMECHEAP_USERNAME
       - key: NAMECHEAP_CLIENT_IP
         value: 44.226.145.213
+        # Note: Render uses multiple outbound IPs. All must be whitelisted in Namecheap:
+        # 44.226.145.213, 54.187.200.255, 34.213.214.55, 35.164.95.156, 44.230.95.183, 44.229.200.200
       - key: SECRET_KEY
         value: email-redirect-secure-key-2024-change-in-production
       - key: FLASK_ENV
