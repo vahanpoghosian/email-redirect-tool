@@ -181,14 +181,28 @@ class NamecheapAPIClient:
             
             print(f"API Response keys: {list(response.keys()) if response else 'None'}")
             
-            # Check if response is successful
-            if response and 'ApiResponse' in response:
-                api_response = response['ApiResponse']
-                if isinstance(api_response, dict) and api_response.get('Status') == 'OK':
-                    print("✅ Namecheap API connection successful")
-                    return True
+            # Check if response is successful - handle namespaced response
+            if response and isinstance(response, dict):
+                # Check for Status attribute (should be 'OK')
+                status = response.get('Status', 'Unknown')
+                print(f"API Response Status: {status}")
+                
+                if status == 'OK':
+                    # Look for CommandResponse with namespace handling
+                    cmd_response = None
+                    for key, value in response.items():
+                        if 'CommandResponse' in key:
+                            cmd_response = value
+                            break
+                    
+                    if cmd_response and isinstance(cmd_response, dict):
+                        print("✅ Namecheap API connection successful")
+                        return True
+                    else:
+                        print("❌ No CommandResponse found in API response")
+                        return False
                 else:
-                    print(f"❌ API returned status: {api_response.get('Status') if isinstance(api_response, dict) else 'Unknown'}")
+                    print(f"❌ API returned status: {status}")
                     return False
             else:
                 print("❌ Unexpected API response format")
@@ -204,17 +218,47 @@ class NamecheapAPIClient:
         try:
             response = self._make_request('namecheap.domains.getList')
             
-            # Navigate to domain data
+            # Navigate to domain data - handle namespaced keys
             domains = []
-            api_response = response.get('ApiResponse', {})
-            command_response = api_response.get('CommandResponse', {})
-            domain_result = command_response.get('DomainGetListResult', {})
             
-            domain_data = domain_result.get('Domain', [])
+            # Find CommandResponse (may be namespaced)
+            command_response = None
+            for key, value in response.items():
+                if 'CommandResponse' in key:
+                    command_response = value
+                    break
+            
+            if not command_response:
+                print("❌ No CommandResponse found")
+                return []
+            
+            # Find DomainGetListResult
+            domain_result = None
+            for key, value in command_response.items():
+                if 'DomainGetListResult' in key:
+                    domain_result = value
+                    break
+            
+            if not domain_result:
+                print("❌ No DomainGetListResult found")
+                return []
+            
+            # Find Domain data (may be namespaced or direct)
+            domain_data = None
+            for key, value in domain_result.items():
+                if 'Domain' in key or key == 'Domain':
+                    domain_data = value
+                    break
+            
+            if not domain_data:
+                print("❌ No Domain data found")
+                return []
             
             # Handle single domain or list of domains
             if isinstance(domain_data, dict):
                 domain_data = [domain_data]
+            
+            print(f"🌐 Processing {len(domain_data)} domains from API")
             
             for domain in domain_data:
                 if isinstance(domain, dict):
