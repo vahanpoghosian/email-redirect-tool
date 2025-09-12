@@ -601,6 +601,8 @@ DASHBOARD_TEMPLATE = """
             window.URL.revokeObjectURL(url);
         }
         
+        let syncProgressInterval = null;
+        
         async function syncAllDomainsFromNamecheap() {
             try {
                 // Show progress bar
@@ -613,6 +615,7 @@ DASHBOARD_TEMPLATE = """
                 progressFill.style.width = '0%';
                 progressText.textContent = 'Starting sync from Namecheap...';
                 statusDiv.innerHTML = '';
+                progressFill.style.background = '#3b82f6';
                 
                 // Start the sync
                 const response = await fetch('/api/sync-all-domains', {
@@ -630,21 +633,15 @@ DASHBOARD_TEMPLATE = """
                     return;
                 }
                 
-                // Update progress
-                progressFill.style.width = '100%';
-                progressText.textContent = `Sync completed! Processed ${result.domains_synced} domains.`;
-                statusDiv.innerHTML = `
-                    <div style="margin-top: 1rem;">
-                        <div><strong>Domains Added:</strong> ${result.domains_added}</div>
-                        <div><strong>Domains Updated:</strong> ${result.domains_updated}</div>
-                        <div><strong>Total in Database:</strong> ${result.total_in_db}</div>
-                    </div>
-                `;
-                
-                // Hide progress after delay
-                setTimeout(() => {
-                    progressDiv.style.display = 'none';
-                }, 3000);
+                if (result.status === 'started') {
+                    progressText.textContent = `Sync started! Processing ${result.processing_count} domains...`;
+                    
+                    // Start polling for progress updates
+                    startProgressPolling();
+                } else {
+                    progressText.textContent = 'Unexpected response from server';
+                    progressFill.style.background = '#ef4444';
+                }
                 
             } catch (error) {
                 const progressText = document.getElementById('sync-progress-text');
@@ -652,6 +649,88 @@ DASHBOARD_TEMPLATE = """
                 progressText.textContent = `Error: ${error.message}`;
                 progressFill.style.background = '#ef4444';
                 console.error('Sync error:', error);
+            }
+        }
+        
+        function startProgressPolling() {
+            if (syncProgressInterval) {
+                clearInterval(syncProgressInterval);
+            }
+            
+            syncProgressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/sync-domains-progress');
+                    const progress = await response.json();
+                    
+                    updateProgressDisplay(progress);
+                    
+                    if (progress.status === 'completed' || progress.status === 'error') {
+                        clearInterval(syncProgressInterval);
+                        syncProgressInterval = null;
+                        
+                        if (progress.status === 'completed') {
+                            // Auto-reload domains after sync completes
+                            setTimeout(() => {
+                                loadDomainsFromDB();
+                            }, 2000);
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Error fetching sync progress:', error);
+                    clearInterval(syncProgressInterval);
+                    syncProgressInterval = null;
+                }
+            }, 1000); // Poll every second
+        }
+        
+        function updateProgressDisplay(progress) {
+            const progressFill = document.getElementById('sync-progress-fill');
+            const progressText = document.getElementById('sync-progress-text');
+            const statusDiv = document.getElementById('sync-status');
+            
+            if (progress.status === 'running') {
+                const percentage = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
+                progressFill.style.width = `${percentage}%`;
+                
+                const currentDomainText = progress.current_domain ? ` - ${progress.current_domain}` : '';
+                progressText.textContent = `Processing domain ${progress.processed}/${progress.total}${currentDomainText}`;
+                
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 1rem;">
+                        <div><strong>Domains Added:</strong> ${progress.domains_added}</div>
+                        <div><strong>Domains Updated:</strong> ${progress.domains_updated}</div>
+                        ${progress.errors.length > 0 ? `<div style="color: #ef4444;"><strong>Recent Errors:</strong> ${progress.errors.length}</div>` : ''}
+                    </div>
+                `;
+                
+            } else if (progress.status === 'completed') {
+                progressFill.style.width = '100%';
+                progressFill.style.background = '#10b981';
+                progressText.textContent = `Sync completed! Processed ${progress.processed} domains.`;
+                
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 1rem;">
+                        <div><strong>Domains Added:</strong> ${progress.domains_added}</div>
+                        <div><strong>Domains Updated:</strong> ${progress.domains_updated}</div>
+                        <div><strong>Total Processed:</strong> ${progress.processed}</div>
+                        ${progress.errors.length > 0 ? `<div style="color: #ef4444;"><strong>Total Errors:</strong> ${progress.errors.length}</div>` : ''}
+                    </div>
+                `;
+                
+                // Hide progress after delay
+                setTimeout(() => {
+                    document.getElementById('sync-progress').style.display = 'none';
+                }, 5000);
+                
+            } else if (progress.status === 'error') {
+                progressFill.style.background = '#ef4444';
+                progressText.textContent = `Sync failed: ${progress.error || 'Unknown error'}`;
+                
+                // Hide progress after delay
+                setTimeout(() => {
+                    document.getElementById('sync-progress').style.display = 'none';
+                }, 5000);
             }
         }
         
@@ -924,29 +1003,40 @@ def dashboard():
     """Main dashboard"""
     return render_template_string(DASHBOARD_TEMPLATE)
 
-@app.route('/api/sync-all-domains', methods=['POST'])
-@require_auth
-def sync_all_domains():
-    """Sync all domains from Namecheap to database with progress tracking"""
+# Global variable to track sync progress
+sync_progress = {
+    "status": "idle",
+    "processed": 0,
+    "total": 0,
+    "current_domain": "",
+    "domains_added": 0,
+    "domains_updated": 0,
+    "errors": []
+}
+
+import threading
+import time
+
+def background_sync_task(namecheap_domains):
+    """Background task to sync domains with progress tracking"""
+    global sync_progress
+    
     try:
-        if not email_manager:
-            return jsonify({"error": "Email manager not initialized"}), 503
+        sync_progress["status"] = "running"
+        sync_progress["total"] = min(50, len(namecheap_domains))
+        sync_progress["processed"] = 0
+        sync_progress["domains_added"] = 0
+        sync_progress["domains_updated"] = 0
+        sync_progress["errors"] = []
         
-        # Get all domains from Namecheap
-        namecheap_domains = email_manager.get_all_domains()
+        print(f"🔄 Starting background sync of {sync_progress['total']} domains...")
         
-        if not namecheap_domains:
-            return jsonify({"error": "No domains found in Namecheap"}), 404
-        
-        # Sync domains to database with redirections
-        domains_added = 0
-        domains_updated = 0
-        
-        print(f"🔄 Starting to sync {len(namecheap_domains)} domains with redirections...")
-        
-        for i, domain_name in enumerate(namecheap_domains[:50], 1):  # Limit to first 50 for now to avoid timeout
+        for i, domain_name in enumerate(namecheap_domains[:50], 1):
+            sync_progress["processed"] = i
+            sync_progress["current_domain"] = domain_name
+            
             try:
-                print(f"Processing {i}/{min(50, len(namecheap_domains))}: {domain_name}")
+                print(f"Processing {i}/{sync_progress['total']}: {domain_name}")
                 
                 # Check if domain exists
                 existing_domain_id = db.get_domain_id(domain_name)
@@ -954,11 +1044,11 @@ def sync_all_domains():
                 if existing_domain_id:
                     # Domain exists, just update timestamp
                     domain_number = db.add_or_update_domain(domain_name)
-                    domains_updated += 1
+                    sync_progress["domains_updated"] += 1
                 else:
                     # New domain, add it
                     domain_number = db.add_or_update_domain(domain_name)
-                    domains_added += 1
+                    sync_progress["domains_added"] += 1
                 
                 # Get redirections for this domain
                 try:
@@ -970,9 +1060,9 @@ def sync_all_domains():
                         print(f"  ℹ️ No redirections found for {domain_name}")
                 except Exception as redirect_error:
                     print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
+                    sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
                 
-                # Add delay to avoid rate limiting - increase delay based on position
-                import time
+                # Add delay to avoid rate limiting
                 if i > 40:  # After 40 domains, much longer delays
                     time.sleep(3)
                 elif i > 20:  # After 20 domains, longer delays
@@ -982,21 +1072,48 @@ def sync_all_domains():
                     
             except Exception as e:
                 print(f"Error syncing domain {domain_name}: {e}")
+                sync_progress["errors"].append(f"{domain_name}: {str(e)}")
                 continue
         
-        # Get total count in database
-        all_domains_in_db = db.get_all_domains_with_redirections()
-        total_in_db = len(all_domains_in_db)
+        sync_progress["status"] = "completed"
+        sync_progress["current_domain"] = ""
+        print(f"✅ Background sync completed: {sync_progress['domains_added']} added, {sync_progress['domains_updated']} updated")
         
-        processed_count = min(50, len(namecheap_domains))
+    except Exception as e:
+        print(f"❌ Background sync failed: {e}")
+        sync_progress["status"] = "error"
+        sync_progress["error"] = str(e)
+
+@app.route('/api/sync-all-domains', methods=['POST'])
+@require_auth
+def sync_all_domains():
+    """Start sync all domains from Namecheap to database"""
+    global sync_progress
+    
+    try:
+        if not email_manager:
+            return jsonify({"error": "Email manager not initialized"}), 503
+        
+        # Check if sync is already running
+        if sync_progress["status"] == "running":
+            return jsonify({"error": "Sync already in progress"}), 409
+        
+        # Get all domains from Namecheap
+        namecheap_domains = email_manager.get_all_domains()
+        
+        if not namecheap_domains:
+            return jsonify({"error": "No domains found in Namecheap"}), 404
+        
+        # Start background sync task
+        sync_thread = threading.Thread(target=background_sync_task, args=(namecheap_domains,))
+        sync_thread.daemon = True
+        sync_thread.start()
         
         return jsonify({
-            "status": "completed",
-            "domains_synced": processed_count,
-            "domains_added": domains_added,
-            "domains_updated": domains_updated,
-            "total_in_db": total_in_db,
-            "note": f"Processed first {processed_count} domains (limited for performance)"
+            "status": "started",
+            "total_domains": len(namecheap_domains),
+            "processing_count": min(50, len(namecheap_domains)),
+            "message": "Domain sync started in background"
         })
         
     except Exception as e:
@@ -1036,13 +1153,17 @@ def add_domain_redirection():
 @app.route('/api/sync-domains-progress', methods=['GET'])
 @require_auth
 def sync_domains_progress():
-    """Get progress of domain sync - this would need WebSocket in production"""
-    # For now, return mock progress
+    """Get real-time progress of domain sync"""
+    global sync_progress
+    
     return jsonify({
-        "status": "in_progress", 
-        "processed": 50,
-        "total": 417,
-        "current_domain": "example.com"
+        "status": sync_progress["status"],
+        "processed": sync_progress["processed"],
+        "total": sync_progress["total"],
+        "current_domain": sync_progress["current_domain"],
+        "domains_added": sync_progress["domains_added"],
+        "domains_updated": sync_progress["domains_updated"],
+        "errors": sync_progress["errors"][-5:] if sync_progress["errors"] else []  # Last 5 errors
     })
 
 @app.route('/api/sync-single-domain', methods=['POST'])
