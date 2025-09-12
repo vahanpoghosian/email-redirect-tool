@@ -52,9 +52,17 @@ class Database:
                 CREATE TABLE IF NOT EXISTS clients (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     client_name TEXT UNIQUE NOT NULL,
+                    client_url TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Add client_url column if it doesn't exist (for existing databases)
+            try:
+                cursor.execute('ALTER TABLE clients ADD COLUMN client_url TEXT')
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
             
             # Users table for authentication
             cursor.execute('''
@@ -217,16 +225,40 @@ class Database:
         """Get all clients"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT id, client_name FROM clients ORDER BY client_name')
+            cursor.execute('SELECT id, client_name, client_url FROM clients ORDER BY client_name')
             
-            return [{'id': row[0], 'name': row[1]} for row in cursor.fetchall()]
+            return [{'id': row[0], 'name': row[1], 'url': row[2]} for row in cursor.fetchall()]
     
-    def add_client(self, client_name: str) -> int:
+    def add_client(self, client_name: str, client_url: str = None) -> int:
         """Add new client"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('INSERT INTO clients (client_name) VALUES (?)', (client_name,))
+            cursor.execute('INSERT INTO clients (client_name, client_url) VALUES (?, ?)', (client_name, client_url))
             return cursor.lastrowid
+    
+    def update_client_url(self, client_id: int, client_url: str):
+        """Update client URL"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE clients SET client_url = ? WHERE id = ?', (client_url, client_id))
+    
+    def delete_client(self, client_id: int):
+        """Delete client"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # First, set all domains using this client to "Unassigned"
+            unassigned_client_id = self.get_unassigned_client_id()
+            cursor.execute('UPDATE domains SET client_id = ? WHERE client_id = ?', (unassigned_client_id, client_id))
+            # Then delete the client
+            cursor.execute('DELETE FROM clients WHERE id = ?', (client_id,))
+    
+    def get_unassigned_client_id(self) -> int:
+        """Get the ID of the 'Unassigned' client"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM clients WHERE client_name = ?', ('Unassigned',))
+            result = cursor.fetchone()
+            return result[0] if result else None
     
     def assign_domain_to_client(self, domain_name: str, client_id: int):
         """Assign domain to client"""

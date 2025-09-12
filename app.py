@@ -796,28 +796,35 @@ DASHBOARD_TEMPLATE = """
             const row = tbody.insertRow();
             row.className = 'domain-row';
             
-            // Domain number and name
+            // Domain number and name (editable)
             const domainCell = row.insertCell(0);
             domainCell.innerHTML = `
-                <div><strong>#${domain.domain_number || 'N/A'}</strong> ${domain.domain_name}</div>
-                <small style="color: #64748b;">Client: ${domain.client_name || 'Unassigned'}</small>
+                <div><strong>#${domain.domain_number || 'N/A'}</strong></div>
+                <input type="text" value="${domain.domain_name}" class="form-control" style="margin: 0.5rem 0;" onchange="updateDomain(this, '${domain.domain_name}', 'domain')">
             `;
             
-            // Redirect target
+            // Redirect target (editable)
             const redirectCell = row.insertCell(1);
-            if (redirect) {
-                redirectCell.innerHTML = `
-                    <div>${redirect.name} → ${redirect.target}</div>
-                    <small style="color: #64748b;">${redirect.type}</small>
-                `;
-            } else {
-                redirectCell.innerHTML = '<span class="no-redirect">No redirections</span>';
-            }
+            const redirectTarget = redirect ? redirect.target : '';
+            redirectCell.innerHTML = `
+                <input type="text" value="${redirectTarget}" class="form-control" placeholder="https://example.com" onchange="updateDomain(this, '${domain.domain_name}', 'redirect')">
+            `;
             
-            // Actions
-            const actionCell = row.insertCell(2);
+            // Client dropdown
+            const clientCell = row.insertCell(2);
+            clientCell.innerHTML = `
+                <select class="form-control" onchange="updateDomainClient(this, '${domain.domain_name}')" id="client-${domain.domain_name.replace(/\./g, '-')}">
+                    <option value="">Unassigned</option>
+                </select>
+            `;
+            
+            // Load clients into dropdown
+            loadClientsIntoDropdown(domain.domain_name, domain.client_id);
+            
+            // Action (save button)
+            const actionCell = row.insertCell(3);
             actionCell.innerHTML = `
-                <button class="btn btn-small" onclick="editDomain('${domain.domain_name}')">Edit</button>
+                <button class="btn btn-small btn-success" onclick="saveDomainChanges('${domain.domain_name}')">💾 Save</button>
             `;
         }
         
@@ -833,8 +840,9 @@ DASHBOARD_TEMPLATE = """
                     <thead>
                         <tr>
                             <th>Domain</th>
-                            <th>Redirects To</th>
-                            <th>Actions</th>
+                            <th>Redirect Target</th>
+                            <th>Client</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody id="domains-tbody"></tbody>
@@ -848,16 +856,266 @@ DASHBOARD_TEMPLATE = """
             alert('Bulk Update functionality - Coming soon! This will allow you to update multiple domain redirections at once.');
         }
         
+        let clientsData = [];
+        
         function showClientModal() {
-            alert('Client Management functionality - Coming soon! This will allow you to add/edit clients and assign domains to them.');
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                background: rgba(0,0,0,0.5); z-index: 1000; display: flex; 
+                align-items: center; justify-content: center;
+            `;
+            
+            modal.innerHTML = `
+                <div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">
+                    <h2>Manage Clients</h2>
+                    
+                    <div style="margin: 1rem 0;">
+                        <h3>Add New Client</h3>
+                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="new-client-name" placeholder="Client Name" class="form-control" style="width: 200px;">
+                            <input type="text" id="new-client-url" placeholder="https://client-website.com" class="form-control" style="width: 300px;">
+                            <button class="btn btn-success" onclick="addNewClient()">➕ Add Client</button>
+                        </div>
+                    </div>
+                    
+                    <div style="margin: 1rem 0;">
+                        <h3>Existing Clients</h3>
+                        <div id="clients-list"></div>
+                    </div>
+                    
+                    <div style="margin-top: 2rem; text-align: right;">
+                        <button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>
+                    </div>
+                </div>
+            `;
+            
+            modal.id = 'client-modal';
+            document.body.appendChild(modal);
+            
+            // Load existing clients
+            loadClientsForModal();
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    closeClientModal();
+                }
+            });
+        }
+        
+        async function loadClientsForModal() {
+            try {
+                const response = await fetch('/api/clients');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    clientsData = data.clients;
+                    displayClientsInModal(data.clients);
+                }
+            } catch (error) {
+                console.error('Error loading clients:', error);
+            }
+        }
+        
+        function displayClientsInModal(clients) {
+            const clientsList = document.getElementById('clients-list');
+            if (!clientsList) return;
+            
+            clientsList.innerHTML = clients.map(client => `
+                <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                        <strong>${client.name}</strong>
+                        <input type="text" value="${client.url || ''}" class="form-control" style="width: 300px;" 
+                               id="client-url-${client.id}" placeholder="https://client-website.com">
+                        <button class="btn btn-small btn-success" onclick="updateClientUrl(${client.id})">Update URL</button>
+                        <button class="btn btn-small" style="background: #ef4444;" onclick="deleteClient(${client.id})">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        async function addNewClient() {
+            const name = document.getElementById('new-client-name').value.trim();
+            const url = document.getElementById('new-client-url').value.trim();
+            
+            if (!name) {
+                alert('Please enter client name');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/clients', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, url })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    document.getElementById('new-client-name').value = '';
+                    document.getElementById('new-client-url').value = '';
+                    loadClientsForModal(); // Refresh the list
+                    alert('Client added successfully!');
+                } else {
+                    alert(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                alert(`Error adding client: ${error.message}`);
+            }
+        }
+        
+        async function updateClientUrl(clientId) {
+            const url = document.getElementById(`client-url-${clientId}`).value.trim();
+            
+            try {
+                const response = await fetch(`/api/clients/${clientId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert('Client URL updated successfully!');
+                } else {
+                    alert(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                alert(`Error updating client: ${error.message}`);
+            }
+        }
+        
+        async function deleteClient(clientId) {
+            if (!confirm('Are you sure you want to delete this client?')) return;
+            
+            try {
+                const response = await fetch(`/api/clients/${clientId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    loadClientsForModal(); // Refresh the list
+                    alert('Client deleted successfully!');
+                } else {
+                    alert(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                alert(`Error deleting client: ${error.message}`);
+            }
+        }
+        
+        function closeClientModal() {
+            const modal = document.getElementById('client-modal');
+            if (modal) {
+                modal.remove();
+            }
         }
         
         function exportRedirections() {
             alert('Export to CSV functionality - Coming soon! This will export all domain redirections to a CSV file.');
         }
         
-        function editDomain(domainName) {
-            alert(`Edit domain: ${domainName} - Coming soon! This will allow you to edit redirections for this domain.`);
+        async function loadClientsIntoDropdown(domainName, currentClientId) {
+            try {
+                const response = await fetch('/api/clients');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const selectId = `client-${domainName.replace(/\./g, '-')}`;
+                    const select = document.getElementById(selectId);
+                    if (select) {
+                        select.innerHTML = '<option value="">Unassigned</option>';
+                        data.clients.forEach(client => {
+                            const option = document.createElement('option');
+                            option.value = client.id;
+                            option.textContent = client.name;
+                            if (client.id === currentClientId) {
+                                option.selected = true;
+                            }
+                            select.appendChild(option);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading clients for dropdown:', error);
+            }
+        }
+        
+        async function updateDomainClient(select, domainName) {
+            const clientId = select.value;
+            
+            // Auto-fill redirect target with client URL if client is selected
+            if (clientId) {
+                try {
+                    const response = await fetch('/api/clients');
+                    const data = await response.json();
+                    
+                    if (data.status === 'success') {
+                        const client = data.clients.find(c => c.id == clientId);
+                        if (client && client.url) {
+                            // Find the redirect input in the same row
+                            const row = select.closest('tr');
+                            const redirectInput = row.querySelector('input[type="text"][placeholder*="example.com"]');
+                            if (redirectInput) {
+                                redirectInput.value = client.url;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error getting client URL:', error);
+                }
+            }
+        }
+        
+        function updateDomain(input, domainName, field) {
+            // This function can be used for real-time validation if needed
+            console.log(`Updated ${field} for ${domainName}: ${input.value}`);
+        }
+        
+        async function saveDomainChanges(originalDomainName) {
+            const row = document.querySelector(`button[onclick="saveDomainChanges('${originalDomainName}')"]`).closest('tr');
+            
+            const domainInput = row.querySelector('input[type="text"]:first-of-type');
+            const redirectInput = row.querySelector('input[type="text"]:nth-of-type(2)');
+            const clientSelect = row.querySelector('select');
+            
+            const newDomainName = domainInput.value.trim();
+            const redirectTarget = redirectInput.value.trim();
+            const clientId = clientSelect.value || null;
+            
+            if (!newDomainName || !redirectTarget) {
+                alert('Please enter both domain name and redirect target');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/update-domain', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        original_domain: originalDomainName,
+                        new_domain: newDomainName,
+                        redirect_target: redirectTarget,
+                        client_id: clientId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert('Domain updated successfully!');
+                    loadDomainsFromDB(); // Refresh the table
+                } else {
+                    alert(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                alert(`Error saving domain: ${error.message}`);
+            }
         }
         
         async function addDomainRedirection() {
@@ -1023,7 +1281,7 @@ def background_sync_task(namecheap_domains):
     
     try:
         sync_progress["status"] = "running"
-        sync_progress["total"] = min(50, len(namecheap_domains))
+        sync_progress["total"] = len(namecheap_domains)
         sync_progress["processed"] = 0
         sync_progress["domains_added"] = 0
         sync_progress["domains_updated"] = 0
@@ -1031,7 +1289,7 @@ def background_sync_task(namecheap_domains):
         
         print(f"🔄 Starting background sync of {sync_progress['total']} domains...")
         
-        for i, domain_name in enumerate(namecheap_domains[:50], 1):
+        for i, domain_name in enumerate(namecheap_domains, 1):
             sync_progress["processed"] = i
             sync_progress["current_domain"] = domain_name
             
@@ -1062,10 +1320,12 @@ def background_sync_task(namecheap_domains):
                     print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
                     sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
                 
-                # Add delay to avoid rate limiting
-                if i > 40:  # After 40 domains, much longer delays
+                # Add delay to avoid rate limiting - scale with domain count
+                if i > 100:  # After 100 domains, much longer delays
+                    time.sleep(4)
+                elif i > 50:  # After 50 domains, longer delays  
                     time.sleep(3)
-                elif i > 20:  # After 20 domains, longer delays
+                elif i > 20:  # After 20 domains, medium delays
                     time.sleep(2)
                 else:  # First 20 domains, shorter delays
                     time.sleep(1)
@@ -1112,7 +1372,7 @@ def sync_all_domains():
         return jsonify({
             "status": "started",
             "total_domains": len(namecheap_domains),
-            "processing_count": min(50, len(namecheap_domains)),
+            "processing_count": len(namecheap_domains),
             "message": "Domain sync started in background"
         })
         
@@ -1195,6 +1455,104 @@ def sync_single_domain():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/clients', methods=['GET'])
+@require_auth
+def get_clients():
+    """Get all clients"""
+    try:
+        clients = db.get_all_clients()
+        return jsonify({
+            "status": "success",
+            "clients": clients
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/clients', methods=['POST'])
+@require_auth
+def add_client():
+    """Add new client"""
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        url = data.get('url', '').strip() or None
+        
+        if not name:
+            return jsonify({"status": "error", "message": "Client name is required"}), 400
+        
+        client_id = db.add_client(name, url)
+        return jsonify({
+            "status": "success",
+            "message": "Client added successfully",
+            "client_id": client_id
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/clients/<int:client_id>', methods=['PUT'])
+@require_auth
+def update_client(client_id):
+    """Update client URL"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip() or None
+        
+        db.update_client_url(client_id, url)
+        return jsonify({
+            "status": "success",
+            "message": "Client updated successfully"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/clients/<int:client_id>', methods=['DELETE'])
+@require_auth
+def delete_client(client_id):
+    """Delete client"""
+    try:
+        db.delete_client(client_id)
+        return jsonify({
+            "status": "success",
+            "message": "Client deleted successfully"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/update-domain', methods=['PUT'])
+@require_auth
+def update_domain():
+    """Update domain information"""
+    try:
+        data = request.get_json()
+        original_domain = data.get('original_domain')
+        new_domain = data.get('new_domain')
+        redirect_target = data.get('redirect_target')
+        client_id = data.get('client_id')
+        
+        if not original_domain or not new_domain or not redirect_target:
+            return jsonify({"status": "error", "message": "Domain name and redirect target are required"}), 400
+        
+        # Update domain name if changed
+        if original_domain != new_domain:
+            # This would require updating the domain name in the database
+            # For now, we'll just update the redirections and client assignment
+            pass
+        
+        # Update redirections
+        redirections = [{'name': '@', 'target': redirect_target, 'type': 'URL'}]
+        db.update_redirections(new_domain, redirections)
+        
+        # Update client assignment
+        if client_id:
+            db.assign_domain_to_client(new_domain, int(client_id))
+        
+        return jsonify({
+            "status": "success",
+            "message": "Domain updated successfully"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/domains-from-db', methods=['GET'])
 @require_auth
