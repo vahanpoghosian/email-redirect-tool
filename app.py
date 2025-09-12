@@ -98,6 +98,27 @@ DASHBOARD_TEMPLATE = """
             </div>
         </div>
         
+        <div class="card">
+            <h2>Add Domain Redirection</h2>
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                <div class="form-group" style="margin: 0;">
+                    <label>Domain:</label>
+                    <input type="text" id="manual-domain" class="form-control" placeholder="example.com" style="width: 200px;">
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label>Redirect To:</label>
+                    <input type="text" id="manual-target" class="form-control" placeholder="https://yoursite.com" style="width: 300px;">
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label>Client:</label>
+                    <select id="manual-client" class="form-control" style="width: 150px;">
+                        <option value="">Unassigned</option>
+                    </select>
+                </div>
+                <button class="btn btn-success" onclick="addDomainRedirection()">➕ Add Redirection</button>
+            </div>
+        </div>
+        
         <div class="card" id="domains-view">
             <h2>All Domains with URL Redirections</h2>
             <div id="domains-summary"></div>
@@ -760,6 +781,50 @@ DASHBOARD_TEMPLATE = """
             alert(`Edit domain: ${domainName} - Coming soon! This will allow you to edit redirections for this domain.`);
         }
         
+        async function addDomainRedirection() {
+            const domain = document.getElementById('manual-domain').value.trim();
+            const target = document.getElementById('manual-target').value.trim();
+            const clientId = document.getElementById('manual-client').value;
+            
+            if (!domain || !target) {
+                alert('Please enter both domain and redirect target');
+                return;
+            }
+            
+            try {
+                // Add domain to database
+                const response = await fetch('/api/add-domain-redirection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        domain: domain,
+                        target: target,
+                        client_id: clientId || null
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert(`Domain redirection added successfully! Domain #${result.domain_number}`);
+                    
+                    // Clear form
+                    document.getElementById('manual-domain').value = '';
+                    document.getElementById('manual-target').value = '';
+                    document.getElementById('manual-client').value = '';
+                    
+                    // Reload domains to show the new one
+                    loadDomainsFromDB();
+                } else {
+                    alert(`Error: ${result.message || result.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                alert(`Error adding domain redirection: ${error.message}`);
+            }
+        }
+        
         // Auto-load domains from database when page loads
         document.addEventListener('DOMContentLoaded', function() {
             loadDomainsFromDB();
@@ -906,9 +971,13 @@ def sync_all_domains():
                 except Exception as redirect_error:
                     print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
                 
-                # Add small delay to avoid rate limiting
-                if i % 10 == 0:  # Every 10 domains
-                    import time
+                # Add delay to avoid rate limiting - increase delay based on position
+                import time
+                if i > 40:  # After 40 domains, much longer delays
+                    time.sleep(3)
+                elif i > 20:  # After 20 domains, longer delays
+                    time.sleep(2)
+                else:  # First 20 domains, shorter delays
                     time.sleep(1)
                     
             except Exception as e:
@@ -932,6 +1001,37 @@ def sync_all_domains():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/add-domain-redirection', methods=['POST'])
+@require_auth
+def add_domain_redirection():
+    """Add a domain redirection manually"""
+    try:
+        data = request.get_json()
+        domain = data.get('domain', '').strip()
+        target = data.get('target', '').strip()
+        client_id = data.get('client_id')
+        
+        if not domain or not target:
+            return jsonify({"status": "error", "message": "Domain and target are required"}), 400
+        
+        # Add domain to database
+        domain_number = db.add_or_update_domain(domain, client_id)
+        
+        # Add redirection to database
+        redirections = [{'name': '@', 'target': target, 'type': 'URL'}]
+        db.update_redirections(domain, redirections)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Domain redirection added successfully",
+            "domain_number": domain_number,
+            "domain": domain,
+            "target": target
+        })
+        
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/sync-domains-progress', methods=['GET'])
 @require_auth
