@@ -72,13 +72,27 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card">
-            <h2>Domain Management</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2>Domain Management</h2>
+                <form method="GET" action="/" style="display: flex; gap: 1rem; align-items: center;">
+                    <input type="text" name="search" class="form-control" placeholder="Search domains..." value="{{ request.args.get('search', '') }}" style="width: 300px;">
+                    <button class="btn" type="submit">🔍 Filter</button>
+                    <a href="/" class="btn" style="background: #6b7280;">Clear</a>
+                </form>
+            </div>
+            
             <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
-                <button class="btn btn-success" onclick="syncAllDomainsFromNamecheap()">🔄 Sync All Domains from Namecheap</button>
-                <button class="btn" onclick="loadDomainsFromDB()">📊 Load Domains from Database</button>
-                <button class="btn" onclick="showBulkUpdateModal()">🔧 Bulk Update</button>
+                <form method="POST" action="/sync-domains" style="display: inline;">
+                    <button class="btn btn-success" type="submit">🔄 Sync All Domains from Namecheap</button>
+                </form>
+                <form method="POST" action="/load-domains" style="display: inline;">
+                    <button class="btn" type="submit">📊 Load Domains from Database</button>
+                </form>
+                <button class="btn" onclick="showBulkUpdateModal()" id="bulk-update-btn">🔧 Bulk Update</button>
                 <button class="btn" onclick="showClientModal()">👥 Manage Clients</button>
-                <button class="btn" onclick="exportRedirections()">📁 Export to CSV</button>
+                <form method="POST" action="/export-csv" style="display: inline;">
+                    <button class="btn" type="submit">📁 Export to CSV</button>
+                </form>
                 <a href="/logout" class="btn" style="background: #ef4444;">🚪 Logout</a>
             </div>
             
@@ -89,42 +103,10 @@ DASHBOARD_TEMPLATE = """
                 <p id="sync-progress-text">Syncing domains from Namecheap...</p>
                 <div id="sync-status"></div>
             </div>
-            
-            <div id="loading">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
-                </div>
-                <p id="progress-text">Loading domains...</p>
-            </div>
-        </div>
-        
-        
-        <div class="card">
-            <h2>Domain Management</h2>
-            <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
-                <form method="POST" action="/sync-domains" style="display: inline;">
-                    <button class="btn btn-success" type="submit">🔄 Sync All Domains from Namecheap</button>
-                </form>
-                <form method="POST" action="/load-domains" style="display: inline;">
-                    <button class="btn" type="submit">📊 Load Domains from Database</button>
-                </form>
-                <form method="POST" action="/export-csv" style="display: inline;">
-                    <button class="btn" type="submit">📁 Export to CSV</button>
-                </form>
-                <a href="/logout" class="btn" style="background: #ef4444;">🚪 Logout</a>
-            </div>
         </div>
         
         <div class="card">
             <h2>All Domains with URL Redirections</h2>
-            
-            <form method="GET" action="/" style="margin-bottom: 1rem;">
-                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                    <input type="text" name="search" class="form-control" placeholder="Search domains..." value="{{ request.args.get('search', '') }}" style="width: 300px;">
-                    <button class="btn" type="submit">🔍 Filter</button>
-                    <a href="/" class="btn" style="background: #6b7280;">Clear</a>
-                </div>
-            </form>
             
             <table class="table">
                 <thead>
@@ -135,6 +117,19 @@ DASHBOARD_TEMPLATE = """
                         <th style="width: 35%;">Redirect Target</th>
                         <th style="width: 15%;">Client</th>
                         <th style="width: 15%;">Status</th>
+                    </tr>
+                    <tr style="background: #f8fafc;">
+                        <th></th>
+                        <th><input type="text" class="form-control" placeholder="Filter #..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
+                        <th><input type="text" class="form-control" placeholder="Filter domains..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
+                        <th><input type="text" class="form-control" placeholder="Filter redirects..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
+                        <th><input type="text" class="form-control" placeholder="Filter clients..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
+                        <th><select class="form-control" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onchange="filterTable()">
+                                <option value="">All Status</option>
+                                <option value="synced">Synced</option>
+                                <option value="not_synced">Not Synced</option>
+                                <option value="unchanged">Unchanged</option>
+                            </select></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -192,12 +187,7 @@ DASHBOARD_TEMPLATE = """
                 </tbody>
             </table>
             
-            <form method="POST" action="/bulk-update" style="margin-top: 1rem;">
-                <div style="display: flex; gap: 1rem; align-items: center;">
-                    <input type="text" name="bulk_target" class="form-control" placeholder="https://example.com" style="width: 300px;" required>
-                    <button type="submit" class="btn btn-success">🔧 Bulk Update Selected</button>
-                </div>
-            </form>
+            <!-- Bulk update modal will be handled by JavaScript -->
             
         </div>
     </div>
@@ -499,11 +489,10 @@ DASHBOARD_TEMPLATE = """
         
         function showClientModal() {
             const modal = document.createElement('div');
-            modal.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                background: rgba(0,0,0,0.5); z-index: 1000; display: flex; 
-                align-items: center; justify-content: center;
-            `;
+            modal.style.cssText = 
+                'position: fixed; top: 0; left: 0; width: 100%; height: 100%; ' +
+                'background: rgba(0,0,0,0.5); z-index: 1000; display: flex; ' +
+                'align-items: center; justify-content: center;';
             
             modal.innerHTML = `
                 <div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">
@@ -803,8 +792,172 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
+        // Bulk update modal
+        function showBulkUpdateModal() {
+            const selectedDomains = collectSelectedDomains();
+            if (selectedDomains.length === 0) {
+                alert('Please select at least one domain for bulk update.');
+                return;
+            }
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = 
+                'position: fixed; top: 0; left: 0; width: 100%; height: 100%; ' +
+                'background: rgba(0,0,0,0.5); z-index: 1000; display: flex; ' +
+                'align-items: center; justify-content: center;';
+            
+            const hiddenInputs = selectedDomains.map(domain => '<input type="hidden" name="selected_domains" value="' + domain + '">').join('');
+            modal.innerHTML = 
+                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 500px;">' +
+                    '<h2>Bulk Update ' + selectedDomains.length + ' Domains</h2>' +
+                    '<form method="POST" action="/bulk-update" style="margin-top: 1rem;">' +
+                        '<div style="margin-bottom: 1rem;">' +
+                            '<label>New Redirect Target:</label>' +
+                            '<input type="text" name="bulk_target" class="form-control" placeholder="https://example.com" required style="width: 100%; margin-top: 0.5rem;">' +
+                        '</div>' +
+                        hiddenInputs +
+                        '<div style="display: flex; gap: 1rem; justify-content: flex-end;">' +
+                            '<button type="button" class="btn" onclick="closeBulkModal()" style="background: #6b7280;">Cancel</button>' +
+                            '<button type="submit" class="btn btn-success">Update All</button>' +
+                        '</div>' +
+                    '</form>' +
+                '</div>';
+            
+            modal.id = 'bulk-modal';
+            document.body.appendChild(modal);
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    closeBulkModal();
+                }
+            });
+        }
         
+        function closeBulkModal() {
+            const modal = document.getElementById('bulk-modal');
+            if (modal) {
+                modal.remove();
+            }
+        }
         
+        // Client management modal
+        function showClientModal() {
+            const modal = document.createElement('div');
+            modal.style.cssText = 
+                'position: fixed; top: 0; left: 0; width: 100%; height: 100%; ' +
+                'background: rgba(0,0,0,0.5); z-index: 1000; display: flex; ' +
+                'align-items: center; justify-content: center;';
+            
+            modal.innerHTML = 
+                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">' +
+                    '<h2>Manage Clients</h2>' +
+                    '<p>Client management functionality - Coming soon!</p>' +
+                    '<div style="margin-top: 2rem; text-align: right;">' +
+                        '<button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>' +
+                    '</div>' +
+                '</div>';
+            
+            modal.id = 'client-modal';
+            document.body.appendChild(modal);
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    closeClientModal();
+                }
+            });
+        }
+        
+        function closeClientModal() {
+            const modal = document.getElementById('client-modal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
+        // Table filtering
+        function filterTable() {
+            const filters = [];
+            const filterInputs = document.querySelectorAll('thead tr:nth-child(2) input, thead tr:nth-child(2) select');
+            filterInputs.forEach(input => {
+                filters.push(input.value.toLowerCase());
+            });
+            
+            const rows = document.querySelectorAll('tbody tr');
+            let visibleCount = 0;
+            
+            rows.forEach(row => {
+                const cells = row.cells;
+                let visible = true;
+                
+                // Skip checkbox column (index 0)
+                for (let i = 1; i < Math.min(cells.length, filters.length + 1); i++) {
+                    const filterValue = filters[i - 1];
+                    if (filterValue) {
+                        const cellText = cells[i].textContent.toLowerCase();
+                        if (!cellText.includes(filterValue)) {
+                            visible = false;
+                            break;
+                        }
+                    }
+                }
+                
+                row.style.display = visible ? '' : 'none';
+                if (visible) visibleCount++;
+            });
+        }
+        
+        // Helper function for bulk operations
+        function collectSelectedDomains() {
+            const selected = [];
+            const checkboxes = document.querySelectorAll('input[name="domain_check"]:checked');
+            checkboxes.forEach(checkbox => {
+                selected.push(checkbox.value);
+            });
+            return selected;
+        }
+        
+        // Update bulk button text with count
+        function updateBulkButtonText() {
+            const bulkBtn = document.getElementById('bulk-update-btn');
+            const selectedCount = collectSelectedDomains().length;
+            if (bulkBtn) {
+                if (selectedCount > 0) {
+                    bulkBtn.textContent = '🔧 Bulk Update (' + selectedCount + ')';
+                    bulkBtn.style.background = '#3b82f6';
+                } else {
+                    bulkBtn.textContent = '🔧 Bulk Update';
+                    bulkBtn.style.background = '';
+                }
+            }
+        }
+        
+        // Add event listeners for checkboxes
+        document.addEventListener('change', function(e) {
+            if (e.target.name === 'domain_check' || e.target.id === 'select-all') {
+                updateBulkButtonText();
+            }
+        });
+        
+        // Show sync progress when sync form is submitted
+        document.addEventListener('DOMContentLoaded', function() {
+            const syncForm = document.querySelector('form[action="/sync-domains"]');
+            if (syncForm) {
+                syncForm.addEventListener('submit', function(e) {
+                    const progressDiv = document.getElementById('sync-progress');
+                    const progressText = document.getElementById('sync-progress-text');
+                    const progressFill = document.getElementById('sync-progress-fill');
+                    
+                    if (progressDiv) {
+                        progressDiv.style.display = 'block';
+                        progressText.textContent = 'Starting sync from Namecheap...';
+                        progressFill.style.width = '10%';
+                        progressFill.style.background = '#3b82f6';
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>
