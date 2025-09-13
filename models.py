@@ -64,6 +64,13 @@ class Database:
                 # Column already exists
                 pass
             
+            # Add sync_status column if it doesn't exist (for existing databases)
+            try:
+                cursor.execute('ALTER TABLE domains ADD COLUMN sync_status TEXT DEFAULT "unchanged"')
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+            
             # Users table for authentication
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -185,7 +192,7 @@ class Database:
                 SELECT 
                     d.id, d.domain_number, d.domain_name, 
                     c.client_name, c.id as client_id,
-                    d.updated_at
+                    d.updated_at, d.sync_status
                 FROM domains d
                 LEFT JOIN clients c ON d.client_id = c.id
                 ORDER BY d.domain_number
@@ -193,7 +200,7 @@ class Database:
             
             domains = []
             for row in cursor.fetchall():
-                domain_id, domain_number, domain_name, client_name, client_id, updated_at = row
+                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status = row
                 
                 # Get redirections
                 cursor.execute('''
@@ -216,7 +223,8 @@ class Database:
                     'client_name': client_name or 'Unassigned',
                     'client_id': client_id,
                     'redirections': redirections,
-                    'updated_at': updated_at
+                    'updated_at': updated_at,
+                    'sync_status': sync_status or 'unchanged'
                 })
             
             return domains
@@ -268,3 +276,12 @@ class Database:
                 UPDATE domains SET client_id = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE domain_name = ?
             ''', (client_id, domain_name))
+    
+    def update_domain_sync_status(self, domain_name: str, status: str):
+        """Update sync status for a domain"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE domains SET sync_status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE domain_name = ?
+            ''', (status, domain_name))

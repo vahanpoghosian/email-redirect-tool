@@ -98,26 +98,6 @@ DASHBOARD_TEMPLATE = """
             </div>
         </div>
         
-        <div class="card">
-            <h2>Add Domain Redirection</h2>
-            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                <div class="form-group" style="margin: 0;">
-                    <label>Domain:</label>
-                    <input type="text" id="manual-domain" class="form-control" placeholder="example.com" style="width: 200px;">
-                </div>
-                <div class="form-group" style="margin: 0;">
-                    <label>Redirect To:</label>
-                    <input type="text" id="manual-target" class="form-control" placeholder="https://yoursite.com" style="width: 300px;">
-                </div>
-                <div class="form-group" style="margin: 0;">
-                    <label>Client:</label>
-                    <select id="manual-client" class="form-control" style="width: 150px;">
-                        <option value="">Unassigned</option>
-                    </select>
-                </div>
-                <button class="btn btn-success" onclick="addDomainRedirection()">➕ Add Redirection</button>
-            </div>
-        </div>
         
         <div class="card" id="domains-view">
             <h2>All Domains with URL Redirections</h2>
@@ -821,11 +801,24 @@ DASHBOARD_TEMPLATE = """
             // Load clients into dropdown
             loadClientsIntoDropdown(domain.domain_name, domain.client_id);
             
-            // Action (save button)
-            const actionCell = row.insertCell(3);
-            actionCell.innerHTML = `
-                <button class="btn btn-small btn-success" onclick="saveDomainChanges('${domain.domain_name}')">💾 Save</button>
-            `;
+            // Status
+            const statusCell = row.insertCell(3);
+            const syncStatus = domain.sync_status || 'unchanged';
+            let statusHtml = '';
+            let statusColor = '';
+            
+            if (syncStatus === 'synced') {
+                statusHtml = '✅ Synced';
+                statusColor = '#10b981'; // Green
+            } else if (syncStatus === 'not_synced') {
+                statusHtml = '❌ Not Synced';
+                statusColor = '#ef4444'; // Red
+            } else {
+                statusHtml = '⚪ Unchanged';
+                statusColor = '#6b7280'; // Gray
+            }
+            
+            statusCell.innerHTML = `<span style="color: ${statusColor}; font-weight: 600;">${statusHtml}</span>`;
         }
         
         function createDomainsCard() {
@@ -842,7 +835,7 @@ DASHBOARD_TEMPLATE = """
                             <th>Domain</th>
                             <th>Redirect Target</th>
                             <th>Client</th>
-                            <th>Action</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody id="domains-tbody"></tbody>
@@ -1077,90 +1070,7 @@ DASHBOARD_TEMPLATE = """
             console.log(`Updated ${field} for ${domainName}: ${input.value}`);
         }
         
-        async function saveDomainChanges(originalDomainName) {
-            const row = document.querySelector(`button[onclick="saveDomainChanges('${originalDomainName}')"]`).closest('tr');
-            
-            const domainInput = row.querySelector('input[type="text"]:first-of-type');
-            const redirectInput = row.querySelector('input[type="text"]:nth-of-type(2)');
-            const clientSelect = row.querySelector('select');
-            
-            const newDomainName = domainInput.value.trim();
-            const redirectTarget = redirectInput.value.trim();
-            const clientId = clientSelect.value || null;
-            
-            if (!newDomainName || !redirectTarget) {
-                alert('Please enter both domain name and redirect target');
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/update-domain', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        original_domain: originalDomainName,
-                        new_domain: newDomainName,
-                        redirect_target: redirectTarget,
-                        client_id: clientId
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    alert('Domain updated successfully!');
-                    loadDomainsFromDB(); // Refresh the table
-                } else {
-                    alert(`Error: ${result.message}`);
-                }
-            } catch (error) {
-                alert(`Error saving domain: ${error.message}`);
-            }
-        }
         
-        async function addDomainRedirection() {
-            const domain = document.getElementById('manual-domain').value.trim();
-            const target = document.getElementById('manual-target').value.trim();
-            const clientId = document.getElementById('manual-client').value;
-            
-            if (!domain || !target) {
-                alert('Please enter both domain and redirect target');
-                return;
-            }
-            
-            try {
-                // Add domain to database
-                const response = await fetch('/api/add-domain-redirection', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        domain: domain,
-                        target: target,
-                        client_id: clientId || null
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    alert(`Domain redirection added successfully! Domain #${result.domain_number}`);
-                    
-                    // Clear form
-                    document.getElementById('manual-domain').value = '';
-                    document.getElementById('manual-target').value = '';
-                    document.getElementById('manual-client').value = '';
-                    
-                    // Reload domains to show the new one
-                    loadDomainsFromDB();
-                } else {
-                    alert(`Error: ${result.message || result.error || 'Unknown error'}`);
-                }
-            } catch (error) {
-                alert(`Error adding domain redirection: ${error.message}`);
-            }
-        }
         
         // Auto-load domains from database when page loads
         document.addEventListener('DOMContentLoaded', function() {
@@ -1308,16 +1218,20 @@ def background_sync_task(namecheap_domains):
                     domain_number = db.add_or_update_domain(domain_name)
                     sync_progress["domains_added"] += 1
                 
-                # Get redirections for this domain
+                # Get redirections for this domain and set sync status
                 try:
                     redirections = email_manager.api_client.get_domain_redirections(domain_name)
                     if redirections:
                         db.update_redirections(domain_name, redirections)
+                        db.update_domain_sync_status(domain_name, 'synced')
                         print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
                     else:
+                        # No redirections found, but sync was successful
+                        db.update_domain_sync_status(domain_name, 'synced')
                         print(f"  ℹ️ No redirections found for {domain_name}")
                 except Exception as redirect_error:
                     print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
+                    db.update_domain_sync_status(domain_name, 'not_synced')
                     sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
                 
                 # Add delay to avoid rate limiting - scale with domain count
