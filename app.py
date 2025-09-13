@@ -99,666 +99,160 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         
-        <div class="card" id="domains-view">
-            <h2>All Domains with URL Redirections</h2>
-            <div id="domains-summary"></div>
-            
-            <div style="margin: 1rem 0;">
-                <input type="text" class="form-control" id="search-filter" placeholder="Search domains..." onkeyup="filterDomains()" style="width: 300px;">
-                <button class="btn" onclick="refreshDomains()" style="margin-left: 1rem;">🔄 Refresh</button>
-                <button class="btn" onclick="loadMoreDomainsBatch()" id="load-more-btn" style="margin-left: 1rem; display: none;">Load More Domains</button>
+        <div class="card">
+            <h2>Domain Management</h2>
+            <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+                <form method="POST" action="/sync-domains" style="display: inline;">
+                    <button class="btn btn-success" type="submit">🔄 Sync All Domains from Namecheap</button>
+                </form>
+                <form method="POST" action="/load-domains" style="display: inline;">
+                    <button class="btn" type="submit">📊 Load Domains from Database</button>
+                </form>
+                <form method="POST" action="/export-csv" style="display: inline;">
+                    <button class="btn" type="submit">📁 Export to CSV</button>
+                </form>
+                <a href="/logout" class="btn" style="background: #ef4444;">🚪 Logout</a>
             </div>
+        </div>
+        
+        <div class="card">
+            <h2>All Domains with URL Redirections</h2>
             
-            <table class="table" id="domains-table">
+            <form method="GET" action="/" style="margin-bottom: 1rem;">
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <input type="text" name="search" class="form-control" placeholder="Search domains..." value="{{ request.args.get('search', '') }}" style="width: 300px;">
+                    <button class="btn" type="submit">🔍 Filter</button>
+                    <a href="/" class="btn" style="background: #6b7280;">Clear</a>
+                </div>
+            </form>
+            
+            <table class="table">
                 <thead>
                     <tr>
+                        <th style="width: 5%;"><input type="checkbox" id="select-all"></th>
                         <th style="width: 5%;">#</th>
                         <th style="width: 25%;">Domain</th>
                         <th style="width: 35%;">Redirect Target</th>
                         <th style="width: 15%;">Client</th>
-                        <th style="width: 20%;">Action</th>
+                        <th style="width: 15%;">Status</th>
                     </tr>
                 </thead>
-                <tbody id="domains-tbody">
+                <tbody>
+                    {% for domain in domains %}
+                        {% if domain.redirections %}
+                            {% for redirect in domain.redirections %}
+                            <tr>
+                                <td><input type="checkbox" name="domain_check" value="{{ domain.domain_name }}"></td>
+                                <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
+                                <td>{{ domain.domain_name }}</td>
+                                <td>
+                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;">
+                                        <input type="hidden" name="domain" value="{{ domain.domain_name }}">
+                                        <input type="text" name="target" value="{{ redirect.target }}" class="form-control" placeholder="https://example.com" style="flex: 1;">
+                                        <button type="submit" class="btn btn-small btn-success">Save</button>
+                                    </form>
+                                </td>
+                                <td>{{ domain.client_name or 'Unassigned' }}</td>
+                                <td>
+                                    {% if domain.sync_status == 'synced' %}
+                                        <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
+                                    {% elif domain.sync_status == 'not_synced' %}
+                                        <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
+                                    {% else %}
+                                        <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td><input type="checkbox" name="domain_check" value="{{ domain.domain_name }}"></td>
+                                <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
+                                <td>{{ domain.domain_name }}</td>
+                                <td>
+                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;">
+                                        <input type="hidden" name="domain" value="{{ domain.domain_name }}">
+                                        <input type="text" name="target" value="" class="form-control" placeholder="https://example.com" style="flex: 1;">
+                                        <button type="submit" class="btn btn-small btn-success">Save</button>
+                                    </form>
+                                </td>
+                                <td>{{ domain.client_name or 'Unassigned' }}</td>
+                                <td>
+                                    {% if domain.sync_status == 'synced' %}
+                                        <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
+                                    {% elif domain.sync_status == 'not_synced' %}
+                                        <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
+                                    {% else %}
+                                        <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endif %}
+                    {% endfor %}
                 </tbody>
             </table>
             
-            <div id="scroll-loader" style="text-align: center; padding: 1rem; display: none;">
-                <div>Loading more domains...</div>
-            </div>
-        </div>
-        
-        <div class="card" id="raw-data">
-            <h2>Raw Data View</h2>
-            <table class="table" id="redirections-table">
-                <thead>
-                    <tr>
-                        <th>Domain</th>
-                        <th>Redirect Type</th>
-                        <th>Target URL</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody id="redirections-body"></tbody>
-            </table>
+            <form method="POST" action="/bulk-update" style="margin-top: 1rem;">
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <input type="text" name="bulk_target" class="form-control" placeholder="https://example.com" style="width: 300px;" required>
+                    <button type="submit" class="btn btn-success">🔧 Bulk Update Selected</button>
+                </div>
+            </form>
+            
         </div>
     </div>
 
     <script>
-        let allDomains = [];
-        let currentPage = 1;
-        let domainsPerPage = 25;
-        let isLoading = false;
-        let hasMore = true;
-        let totalDomains = 0;
-        let allRedirections = [];
-        let groupedData = {};
-        
-        async function loadAllDomains() {
-            try {
-                // Reset state
-                allDomains = [];
-                currentPage = 1;
-                hasMore = true;
-                
-                document.getElementById('loading').style.display = 'block';
-                document.getElementById('domains-view').style.display = 'none';
-                document.getElementById('raw-data').style.display = 'none';
-                
-                // Load first batch
-                await loadDomainsBatch(1);
-                
-                document.getElementById('domains-view').style.display = 'block';
-                document.getElementById('raw-data').style.display = 'block';
-                
-            } catch (error) {
-                alert('Error loading domains: ' + error.message);
-            } finally {
-                document.getElementById('loading').style.display = 'none';
-            }
-        }
-        
-        async function loadDomainsBatch(page) {
-            if (isLoading) return;
-            
-            isLoading = true;
-            
-            try {
-                const response = await fetch('/api/domains-batch?page=' + page + '&per_page=' + domainsPerPage);
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    // Add new domains to existing list
-                    allDomains = allDomains.concat(data.domains);
-                    
-                    // Update pagination info
-                    hasMore = data.pagination.has_next;
-                    totalDomains = data.pagination.total_domains;
-                    currentPage = data.pagination.page;
-                    
-                    // Update display
-                    displayDomains();
-                    
-                    // Show/hide load more button
-                    const loadMoreBtn = document.getElementById('load-more-btn');
-                    if (hasMore) {
-                        loadMoreBtn.style.display = 'inline-block';
-                    } else {
-                        loadMoreBtn.style.display = 'none';
-                    }
-                    
-                } else {
-                    alert('Error: ' + data.message);
-                }
-            } catch (error) {
-                alert('Error loading domain batch: ' + error.message);
-            } finally {
-                isLoading = false;
-            }
-        }
-        
-        async function loadMoreDomainsBatch() {
-            if (!hasMore || isLoading) return;
-            
-            const nextPage = currentPage + 1;
-            await loadDomainsBatch(nextPage);
-        }
-        
-        function displayDomains() {
-            const tbody = document.getElementById('domains-tbody');
-            const summary = document.getElementById('domains-summary');
-            
-            // Clear existing rows
-            tbody.innerHTML = '';
-            
-            // Update summary
-            const totalDomains = allDomains.length;
-            const domainsWithRedirects = allDomains.filter(d => d.redirections && d.redirections.length > 0).length;
-            
-            summary.innerHTML = 
-                '<div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">' +
-                    '<div><strong>Total Domains:</strong> ' + totalDomains + '</div>' +
-                    '<div><strong>Domains with Redirects:</strong> ' + domainsWithRedirects + '</div>' +
-                '</div>';
-            
-            // Add all domains to table
-            allDomains.forEach((domain, domainIndex) => {
-                if (domain.redirections && domain.redirections.length > 0) {
-                    // Domain has redirections - show each redirection
-                    domain.redirections.forEach((redirect, redirectIndex) => {
-                        createDomainRow(domain, redirect, redirectIndex, domainIndex);
+        // Simple checkbox select all functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const selectAllCheckbox = document.getElementById('select-all');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.addEventListener('change', function() {
+                    const checkboxes = document.querySelectorAll('input[name="domain_check"]');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.checked = this.checked;
                     });
-                } else {
-                    // Domain has no redirections - show empty row
-                    createEmptyDomainRow(domain, domainIndex);
-                }
-            });
-            
-            setupInfiniteScroll();
-        }
-        
-        function createDomainRow(domain, redirect, redirectIndex, domainIndex) {
-            const tbody = document.getElementById('domains-tbody');
-            const row = tbody.insertRow();
-            row.className = 'domain-row';
-            
-            // Domain name cell
-            const domainCell = row.insertCell(0);
-            domainCell.innerHTML = `<div class="domain-name">${domain.name}</div>`;
-            
-            // Redirect target cell (editable)
-            const redirectCell = row.insertCell(1);
-            const safeId = `${domain.name.replace(/\./g, '-')}-${redirectIndex}`;
-            redirectCell.innerHTML = `
-                <input type="text" class="redirect-input" 
-                       value="${redirect.target || ''}" 
-                       id="target-${safeId}" 
-                       placeholder="https://example.com">
-                <div id="status-${safeId}" class="status-updating" style="display: none; margin-top: 0.25rem;"></div>
-            `;
-            
-            // Action cell
-            const actionCell = row.insertCell(2);
-            actionCell.innerHTML = `
-                <button class="btn btn-small btn-success" onclick="updateDomainRedirect('${domain.name}', '${redirect.name || '@'}', ${redirectIndex})">
-                    Update
-                </button>
-            `;
-        }
-        
-        function createEmptyDomainRow(domain, domainIndex) {
-            const tbody = document.getElementById('domains-tbody');
-            const row = tbody.insertRow();
-            row.className = 'domain-row';
-            
-            // Domain name cell
-            const domainCell = row.insertCell(0);
-            domainCell.innerHTML = `<div class="domain-name">${domain.name}</div>`;
-            
-            // Redirect target cell (empty, ready for input)
-            const redirectCell = row.insertCell(1);
-            const safeId = `${domain.name.replace(/\./g, '-')}-new`;
-            redirectCell.innerHTML = `
-                <input type="text" class="redirect-input" 
-                       value="" 
-                       id="target-${safeId}" 
-                       placeholder="Enter redirect URL (https://example.com)">
-                <div id="status-${safeId}" class="status-updating" style="display: none; margin-top: 0.25rem;"></div>
-            `;
-            
-            // Action cell
-            const actionCell = row.insertCell(2);
-            actionCell.innerHTML = `
-                <button class="btn btn-small add-redirect-btn" onclick="addDomainRedirect('${domain.name}')">
-                    + Add
-                </button>
-            `;
-        }
-        
-        function setupInfiniteScroll() {
-            window.addEventListener('scroll', () => {
-                if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 1000) {
-                    if (!isLoading && currentPage * domainsPerPage < allDomains.length) {
-                        loadMoreDomains();
-                    }
-                }
-            });
-        }
-        
-        async function updateDomainRedirect(domainName, redirectName, redirectIndex) {
-            const safeId = `${domainName.replace(/\./g, '-')}-${redirectIndex}`;
-            const targetField = document.getElementById(`target-${safeId}`);
-            const statusDiv = document.getElementById(`status-${safeId}`);
-            
-            const target = targetField.value.trim();
-            
-            if (!target) {
-                alert('Please enter a target URL');
-                return;
-            }
-            
-            // Show loading status
-            statusDiv.style.display = 'block';
-            statusDiv.textContent = 'Updating...';
-            statusDiv.className = 'status-updating';
-            
-            try {
-                const response = await fetch('/api/update-redirection', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        domain: domainName,
-                        name: redirectName,
-                        target: target
-                    })
                 });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    statusDiv.textContent = '✅ Updated!';
-                    statusDiv.className = 'status-success';
-                    
-                    // Update local data
-                    const domain = allDomains.find(d => d.name === domainName);
-                    if (domain && domain.redirections && domain.redirections[redirectIndex]) {
-                        domain.redirections[redirectIndex].target = target;
-                    }
-                } else {
-                    statusDiv.textContent = '❌ Error!';
-                    statusDiv.className = 'status-error';
-                    alert(`Update failed: ${result.message}`);
-                }
-            } catch (error) {
-                statusDiv.textContent = '❌ Error!';
-                statusDiv.className = 'status-error';
-                alert(`Update failed: ${error.message}`);
             }
             
-            // Hide status after 3 seconds
-            setTimeout(() => {
-                statusDiv.style.display = 'none';
-            }, 3000);
-        }
-        
-        async function addDomainRedirect(domainName) {
-            const safeId = `${domainName.replace(/\./g, '-')}-new`;
-            const targetField = document.getElementById(`target-${safeId}`);
-            const statusDiv = document.getElementById(`status-${safeId}`);
-            
-            const target = targetField.value.trim();
-            
-            if (!target) {
-                alert('Please enter a target URL');
-                return;
-            }
-            
-            // Show loading status
-            statusDiv.style.display = 'block';
-            statusDiv.textContent = 'Adding...';
-            statusDiv.className = 'status-updating';
-            
-            try {
-                const response = await fetch('/api/update-redirection', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        domain: domainName,
-                        name: '@',
-                        target: target
-                    })
+            // Collect selected domains for bulk update
+            function collectSelectedDomains() {
+                const selected = [];
+                const checkboxes = document.querySelectorAll('input[name="domain_check"]:checked');
+                checkboxes.forEach(checkbox => {
+                    selected.push(checkbox.value);
                 });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    statusDiv.textContent = '✅ Added!';
-                    statusDiv.className = 'status-success';
-                    
-                    // Refresh the domain list to show the new redirect
-                    setTimeout(() => {
-                        refreshDomains();
-                    }, 1000);
-                } else {
-                    statusDiv.textContent = '❌ Error!';
-                    statusDiv.className = 'status-error';
-                    alert(`Add failed: ${result.message}`);
-                }
-            } catch (error) {
-                statusDiv.textContent = '❌ Error!';
-                statusDiv.className = 'status-error';
-                alert(`Add failed: ${error.message}`);
-            }
-        }
-        
-        function refreshDomains() {
-            loadAllDomains();
-        }
-        
-        function filterDomains() {
-            const searchTerm = document.getElementById('search-filter').value.toLowerCase();
-            const rows = document.querySelectorAll('.domain-row');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(searchTerm) ? '' : 'none';
-            });
-        }
-        
-        async function loadAllRedirections() {
-            // Legacy function - redirect to new function
-            loadAllDomains();
-        }
-        
-        function displayRedirections() {
-            // Update summary
-            const summary = document.getElementById('redirections-summary');
-            const totalDomains = new Set(allRedirections.map(r => r.domain)).size;
-            const totalRedirects = allRedirections.length;
-            const uniqueTargets = new Set(allRedirections.map(r => r.target)).size;
-            
-            summary.innerHTML = `
-                <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div><strong>Total Domains:</strong> ${totalDomains}</div>
-                    <div><strong>Total Redirections:</strong> ${totalRedirects}</div>
-                    <div><strong>Unique Target Emails:</strong> ${uniqueTargets}</div>
-                </div>
-            `;
-            
-            // Update raw data table
-            const tbody = document.getElementById('redirections-body');
-            tbody.innerHTML = '';
-            
-            allRedirections.forEach(redirect => {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = redirect.domain;
-                row.insertCell(1).textContent = redirect.type;
-                row.insertCell(2).textContent = redirect.target;
-                row.insertCell(3).innerHTML = redirect.status === 'active' ? 
-                    '<span class="status-success">Active</span>' : 
-                    '<span class="status-error">Inactive</span>';
-            });
-            
-            // Update grouping
-            updateGrouping();
-        }
-        
-        function updateGrouping() {
-            const groupBy = document.getElementById('group-filter').value;
-            const groupedDiv = document.getElementById('grouped-redirections');
-            
-            // Group data
-            groupedData = {};
-            allRedirections.forEach(redirect => {
-                let key;
-                switch(groupBy) {
-                    case 'target':
-                        key = redirect.target;
-                        break;
-                    case 'domain':
-                        key = redirect.domain;
-                        break;
-                    case 'type':
-                        key = redirect.type;
-                        break;
-                }
-                
-                if (!groupedData[key]) {
-                    groupedData[key] = [];
-                }
-                groupedData[key].push(redirect);
-            });
-            
-            // Display grouped data
-            let html = '';
-            Object.entries(groupedData).sort().forEach(([group, redirects]) => {
-                html += `
-                    <div class="group-card">
-                        <div class="group-header">
-                            <h3>${groupBy === 'target' ? '🔗' : groupBy === 'domain' ? '🌐' : '📋'} ${group}</h3>
-                            <span class="group-count">${redirects.length} ${redirects.length === 1 ? 'redirect' : 'redirects'}</span>
-                        </div>
-                        <div>
-                `;
-                
-                redirects.forEach(redirect => {
-                    if (groupBy === 'target') {
-                        html += `<div class="redirect-item">
-                            <strong>${redirect.domain}</strong> → ${redirect.target}
-                        </div>`;
-                    } else if (groupBy === 'domain') {
-                        html += `<div class="redirect-item">
-                            ${redirect.type}: <strong>${redirect.target}</strong>
-                        </div>`;
-                    } else {
-                        html += `<div class="redirect-item">
-                            <strong>${redirect.domain}</strong> → ${redirect.target}
-                        </div>`;
-                    }
-                });
-                
-                html += `</div></div>`;
-            });
-            
-            groupedDiv.innerHTML = html;
-        }
-        
-        function filterResults() {
-            const searchTerm = document.getElementById('search-filter').value.toLowerCase();
-            const rows = document.getElementById('redirections-body').querySelectorAll('tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(searchTerm) ? '' : 'none';
-            });
-        }
-        
-        function exportRedirections() {
-            if (allRedirections.length === 0) {
-                alert('No redirections to export. Load data first.');
-                return;
+                return selected;
             }
             
-            let csv = 'Domain,Redirect Type,Target URL,Status\\n';
-            
-            allRedirections.forEach(redirect => {
-                csv += `${redirect.domain},${redirect.type},${redirect.target},${redirect.status}\\n`;
-            });
-            
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = `domain_redirections_${new Date().toISOString().slice(0,10)}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-        }
-        
-        let syncProgressInterval = null;
-        
-        async function syncAllDomainsFromNamecheap() {
-            try {
-                // Show progress bar
-                const progressDiv = document.getElementById('sync-progress');
-                const progressFill = document.getElementById('sync-progress-fill');
-                const progressText = document.getElementById('sync-progress-text');
-                const statusDiv = document.getElementById('sync-status');
-                
-                progressDiv.style.display = 'block';
-                progressFill.style.width = '0%';
-                progressText.textContent = 'Starting sync from Namecheap...';
-                statusDiv.innerHTML = '';
-                progressFill.style.background = '#3b82f6';
-                
-                // Start the sync
-                const response = await fetch('/api/sync-all-domains', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                const result = await response.json();
-                
-                if (result.error) {
-                    progressText.textContent = 'Error: ' + result.error;
-                    progressFill.style.background = '#ef4444';
-                    return;
-                }
-                
-                if (result.status === 'started') {
-                    progressText.textContent = 'Sync started! Processing ' + result.processing_count + ' domains...';
-                    
-                    // Start polling for progress updates
-                    startProgressPolling();
-                } else {
-                    progressText.textContent = 'Unexpected response from server';
-                    progressFill.style.background = '#ef4444';
-                }
-                
-            } catch (error) {
-                const progressText = document.getElementById('sync-progress-text');
-                const progressFill = document.getElementById('sync-progress-fill');
-                progressText.textContent = `Error: ${error.message}`;
-                progressFill.style.background = '#ef4444';
-                console.error('Sync error:', error);
-            }
-        }
-        
-        function startProgressPolling() {
-            if (syncProgressInterval) {
-                clearInterval(syncProgressInterval);
-            }
-            
-            syncProgressInterval = setInterval(async () => {
-                try {
-                    const response = await fetch('/api/sync-domains-progress');
-                    const progress = await response.json();
-                    
-                    updateProgressDisplay(progress);
-                    
-                    if (progress.status === 'completed' || progress.status === 'error') {
-                        clearInterval(syncProgressInterval);
-                        syncProgressInterval = null;
-                        
-                        if (progress.status === 'completed') {
-                            // Auto-reload domains after sync completes
-                            setTimeout(() => {
-                                loadDomainsFromDB();
-                            }, 2000);
-                        }
+            // Add selected domains as hidden inputs to bulk update form
+            const bulkForm = document.querySelector('form[action="/bulk-update"]');
+            if (bulkForm) {
+                bulkForm.addEventListener('submit', function(e) {
+                    const selectedDomains = collectSelectedDomains();
+                    if (selectedDomains.length === 0) {
+                        e.preventDefault();
+                        alert('Please select at least one domain for bulk update.');
+                        return;
                     }
                     
-                } catch (error) {
-                    console.error('Error fetching sync progress:', error);
-                    clearInterval(syncProgressInterval);
-                    syncProgressInterval = null;
-                }
-            }, 1000); // Poll every second
-        }
-        
-        function updateProgressDisplay(progress) {
-            const progressFill = document.getElementById('sync-progress-fill');
-            const progressText = document.getElementById('sync-progress-text');
-            const statusDiv = document.getElementById('sync-status');
-            
-            if (progress.status === 'running') {
-                const percentage = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
-                progressFill.style.width = percentage + '%';
-                
-                const currentDomainText = progress.current_domain ? ' - ' + progress.current_domain : '';
-                progressText.textContent = 'Processing domain ' + progress.processed + '/' + progress.total + currentDomainText;
-                
-                statusDiv.innerHTML = '<div style="margin-top: 1rem;"><div><strong>Domains Added:</strong> ' + progress.domains_added + '</div><div><strong>Domains Updated:</strong> ' + progress.domains_updated + '</div>' + (progress.errors.length > 0 ? '<div style="color: #ef4444;"><strong>Recent Errors:</strong> ' + progress.errors.length + '</div>' : '') + '</div>';
-                
-            } else if (progress.status === 'completed') {
-                progressFill.style.width = '100%';
-                progressFill.style.background = '#10b981';
-                progressText.textContent = 'Sync completed! Processed ' + progress.processed + ' domains.';
-                
-                statusDiv.innerHTML = '<div style="margin-top: 1rem;"><div><strong>Domains Added:</strong> ' + progress.domains_added + '</div><div><strong>Domains Updated:</strong> ' + progress.domains_updated + '</div><div><strong>Total Processed:</strong> ' + progress.processed + '</div>' + (progress.errors.length > 0 ? '<div style="color: #ef4444;"><strong>Total Errors:</strong> ' + progress.errors.length + '</div>' : '') + '</div>';
-                
-                // Hide progress after delay
-                setTimeout(() => {
-                    document.getElementById('sync-progress').style.display = 'none';
-                }, 5000);
-                
-            } else if (progress.status === 'error') {
-                progressFill.style.background = '#ef4444';
-                progressText.textContent = 'Sync failed: ' + (progress.error || 'Unknown error');
-                
-                // Hide progress after delay
-                setTimeout(() => {
-                    document.getElementById('sync-progress').style.display = 'none';
-                }, 5000);
-            }
-        }
-        
-        async function loadDomainsFromDB() {
-            try {
-                const response = await fetch('/api/domains-from-db');
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    displayDomainsTable(data.domains, data.clients);
-                } else {
-                    alert('Error loading domains: ' + (data.message || 'Unknown error'));
-                }
-            } catch (error) {
-                alert('Error loading domains from database: ' + error.message);
-            }
-        }
-        
-        function displayDomainsTable(domains, clients) {
-            // Show the domains view
-            document.getElementById('domains-view').style.display = 'block';
-            
-            const tbody = document.getElementById('domains-tbody');
-            const summary = document.getElementById('domains-summary');
-            
-            if (!tbody) {
-                // Create domains table if it doesn't exist
-                const domainsCard = document.querySelector('#domains-view') || createDomainsCard();
-            }
-            
-            // Clear existing content
-            if (tbody) tbody.innerHTML = '';
-            
-            // Update summary
-            const totalDomains = domains.length;
-            const domainsWithRedirects = domains.filter(d => d.redirections && d.redirections.length > 0).length;
-            
-            if (summary) {
-                summary.innerHTML = `
-                    <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                        <div><strong>Total Domains:</strong> ${totalDomains}</div>
-                        <div><strong>Domains with Redirects:</strong> ${domainsWithRedirects}</div>
-                    </div>
-                `;
-            }
-            
-            // Add domains to table
-            domains.forEach((domain, index) => {
-                if (domain.redirections && domain.redirections.length > 0) {
-                    domain.redirections.forEach((redirect, redirectIndex) => {
-                        createDomainTableRow(domain, redirect, redirectIndex);
+                    // Remove existing hidden inputs
+                    const existingInputs = this.querySelectorAll('input[name="selected_domains"]');
+                    existingInputs.forEach(input => input.remove());
+                    
+                    // Add selected domains as hidden inputs
+                    selectedDomains.forEach(domain => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'selected_domains';
+                        input.value = domain;
+                        this.appendChild(input);
                     });
-                } else {
-                    createDomainTableRow(domain, null, 0);
-                }
-            });
-            
-            // Populate client filter after all domains are loaded
-            setTimeout(() => {
-                populateClientFilter();
-            }, 500);
-        }
+                });
+            }
+        });
+        
+        
         
         function createDomainTableRow(domain, redirect, redirectIndex) {
             const tbody = document.getElementById('domains-tbody');
@@ -1311,10 +805,6 @@ DASHBOARD_TEMPLATE = """
         
         
         
-        // Auto-load domains from database when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            loadDomainsFromDB();
-        });
     </script>
 </body>
 </html>
@@ -1404,11 +894,18 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 @require_auth
 def dashboard():
     """Main dashboard"""
-    return render_template_string(DASHBOARD_TEMPLATE)
+    search_query = request.args.get('search', '')
+    domains = db.get_all_domains_with_redirections()
+    
+    # Filter domains if search query
+    if search_query:
+        domains = [d for d in domains if search_query.lower() in d['domain_name'].lower()]
+    
+    return render_template_string(DASHBOARD_TEMPLATE, domains=domains, request=request)
 
 # Global variable to track sync progress
 sync_progress = {
@@ -2214,6 +1711,126 @@ def update_domain_status():
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# Server-side routes for HTML forms
+@app.route('/sync-domains', methods=['POST'])
+@require_auth
+def sync_domains_form():
+    """Handle sync domains form submission"""
+    try:
+        if not email_manager:
+            return "Email manager not initialized", 503
+        
+        # Get all domains from Namecheap
+        namecheap_domains = email_manager.get_all_domains()
+        
+        if not namecheap_domains:
+            return "No domains found in Namecheap", 404
+        
+        # Start background sync task
+        sync_thread = threading.Thread(target=background_sync_task, args=(namecheap_domains,))
+        sync_thread.daemon = True
+        sync_thread.start()
+        
+        return redirect(url_for('dashboard'))
+        
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
+@app.route('/load-domains', methods=['POST'])
+@require_auth
+def load_domains_form():
+    """Handle load domains from database form submission"""
+    return redirect(url_for('dashboard'))
+
+@app.route('/update-redirect', methods=['POST'])
+@require_auth
+def update_redirect_form():
+    """Handle individual redirect update form submission"""
+    try:
+        domain = request.form.get('domain')
+        target = request.form.get('target')
+        
+        if not domain or not target:
+            return "Domain and target are required", 400
+        
+        # Update via Namecheap API
+        success = email_manager.api_client.set_domain_redirection(domain, '@', target)
+        
+        if success:
+            # Update status in UI only (not persisted in database per user request)
+            return redirect(url_for('dashboard'))
+        else:
+            return f"Failed to update redirection for {domain}", 500
+            
+    except Exception as e:
+        return f"Error updating redirect: {str(e)}", 500
+
+@app.route('/bulk-update', methods=['POST'])
+@require_auth
+def bulk_update_form():
+    """Handle bulk update form submission"""
+    try:
+        selected_domains = request.form.getlist('selected_domains')
+        bulk_target = request.form.get('bulk_target')
+        
+        if not selected_domains or not bulk_target:
+            return "Selected domains and target URL are required", 400
+        
+        # Process bulk updates
+        results = []
+        for domain in selected_domains:
+            try:
+                success = email_manager.api_client.set_domain_redirection(domain, '@', bulk_target)
+                results.append({'domain': domain, 'success': success})
+                # Add delay between updates
+                import time
+                time.sleep(0.6)
+            except Exception as e:
+                results.append({'domain': domain, 'success': False, 'error': str(e)})
+        
+        return redirect(url_for('dashboard'))
+        
+    except Exception as e:
+        return f"Error in bulk update: {str(e)}", 500
+
+@app.route('/export-csv', methods=['POST'])
+@require_auth
+def export_csv_form():
+    """Handle CSV export form submission"""
+    try:
+        domains = db.get_all_domains_with_redirections()
+        
+        # Create CSV content
+        csv_rows = []
+        csv_rows.append('Domain Number,Domain Name,Redirect Target,Client,Status,Last Updated')
+        
+        for domain in domains:
+            domain_number = domain['domain_number'] or 'N/A'
+            domain_name = domain['domain_name'] or ''
+            client_name = domain['client_name'] or 'Unassigned'
+            sync_status = domain['sync_status'] or 'unchanged'
+            updated_at = domain['updated_at'] if domain['updated_at'] else 'N/A'
+            
+            if domain['redirections']:
+                for redirect in domain['redirections']:
+                    target = redirect['target'] or 'No redirect'
+                    csv_rows.append(f'{domain_number},"{domain_name}","{target}","{client_name}","{sync_status}","{updated_at}"')
+            else:
+                csv_rows.append(f'{domain_number},"{domain_name}","No redirect","{client_name}","{sync_status}","{updated_at}"')
+        
+        csv_content = '\n'.join(csv_rows)
+        
+        # Return CSV file
+        from flask import make_response
+        response = make_response(csv_content)
+        response.headers['Content-Disposition'] = f'attachment; filename=domain_redirections_{datetime.now().strftime("%Y%m%d")}.csv'
+        response.headers['Content-Type'] = 'text/csv'
+        
+        return response
+        
+    except Exception as e:
+        return f"Error exporting CSV: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
