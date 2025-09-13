@@ -607,13 +607,13 @@ DASHBOARD_TEMPLATE = """
                 const result = await response.json();
                 
                 if (result.error) {
-                    progressText.textContent = `Error: ${result.error}`;
+                    progressText.textContent = 'Error: ' + result.error;
                     progressFill.style.background = '#ef4444';
                     return;
                 }
                 
                 if (result.status === 'started') {
-                    progressText.textContent = `Sync started! Processing ${result.processing_count} domains...`;
+                    progressText.textContent = 'Sync started! Processing ' + result.processing_count + ' domains...';
                     
                     // Start polling for progress updates
                     startProgressPolling();
@@ -670,32 +670,19 @@ DASHBOARD_TEMPLATE = """
             
             if (progress.status === 'running') {
                 const percentage = progress.total > 0 ? (progress.processed / progress.total) * 100 : 0;
-                progressFill.style.width = `${percentage}%`;
+                progressFill.style.width = percentage + '%';
                 
-                const currentDomainText = progress.current_domain ? ` - ${progress.current_domain}` : '';
-                progressText.textContent = `Processing domain ${progress.processed}/${progress.total}${currentDomainText}`;
+                const currentDomainText = progress.current_domain ? ' - ' + progress.current_domain : '';
+                progressText.textContent = 'Processing domain ' + progress.processed + '/' + progress.total + currentDomainText;
                 
-                statusDiv.innerHTML = `
-                    <div style="margin-top: 1rem;">
-                        <div><strong>Domains Added:</strong> ${progress.domains_added}</div>
-                        <div><strong>Domains Updated:</strong> ${progress.domains_updated}</div>
-                        ${progress.errors.length > 0 ? `<div style="color: #ef4444;"><strong>Recent Errors:</strong> ${progress.errors.length}</div>` : ''}
-                    </div>
-                `;
+                statusDiv.innerHTML = '<div style="margin-top: 1rem;"><div><strong>Domains Added:</strong> ' + progress.domains_added + '</div><div><strong>Domains Updated:</strong> ' + progress.domains_updated + '</div>' + (progress.errors.length > 0 ? '<div style="color: #ef4444;"><strong>Recent Errors:</strong> ' + progress.errors.length + '</div>' : '') + '</div>';
                 
             } else if (progress.status === 'completed') {
                 progressFill.style.width = '100%';
                 progressFill.style.background = '#10b981';
-                progressText.textContent = `Sync completed! Processed ${progress.processed} domains.`;
+                progressText.textContent = 'Sync completed! Processed ' + progress.processed + ' domains.';
                 
-                statusDiv.innerHTML = `
-                    <div style="margin-top: 1rem;">
-                        <div><strong>Domains Added:</strong> ${progress.domains_added}</div>
-                        <div><strong>Domains Updated:</strong> ${progress.domains_updated}</div>
-                        <div><strong>Total Processed:</strong> ${progress.processed}</div>
-                        ${progress.errors.length > 0 ? `<div style="color: #ef4444;"><strong>Total Errors:</strong> ${progress.errors.length}</div>` : ''}
-                    </div>
-                `;
+                statusDiv.innerHTML = '<div style="margin-top: 1rem;"><div><strong>Domains Added:</strong> ' + progress.domains_added + '</div><div><strong>Domains Updated:</strong> ' + progress.domains_updated + '</div><div><strong>Total Processed:</strong> ' + progress.processed + '</div>' + (progress.errors.length > 0 ? '<div style="color: #ef4444;"><strong>Total Errors:</strong> ' + progress.errors.length + '</div>' : '') + '</div>';
                 
                 // Hide progress after delay
                 setTimeout(() => {
@@ -704,7 +691,7 @@ DASHBOARD_TEMPLATE = """
                 
             } else if (progress.status === 'error') {
                 progressFill.style.background = '#ef4444';
-                progressText.textContent = `Sync failed: ${progress.error || 'Unknown error'}`;
+                progressText.textContent = 'Sync failed: ' + (progress.error || 'Unknown error');
                 
                 // Hide progress after delay
                 setTimeout(() => {
@@ -721,10 +708,10 @@ DASHBOARD_TEMPLATE = """
                 if (data.status === 'success') {
                     displayDomainsTable(data.domains, data.clients);
                 } else {
-                    alert(`Error loading domains: ${data.message || 'Unknown error'}`);
+                    alert('Error loading domains: ' + (data.message || 'Unknown error'));
                 }
             } catch (error) {
-                alert(`Error loading domains from database: ${error.message}`);
+                alert('Error loading domains from database: ' + error.message);
             }
         }
         
@@ -968,7 +955,7 @@ DASHBOARD_TEMPLATE = """
             const summary = document.getElementById('domains-summary');
             if (summary && visibleCount !== totalCount) {
                 const originalText = summary.innerHTML;
-                const filterText = `<div style="color: #3b82f6; font-weight: 600; margin-bottom: 0.5rem;">Showing ${visibleCount} of ${totalCount} domains (filtered)</div>`;
+                const filterText = '<div style="color: #3b82f6; font-weight: 600; margin-bottom: 0.5rem;">Showing ' + visibleCount + ' of ' + totalCount + ' domains (filtered)</div>';
                 if (!originalText.includes('filtered')) {
                     summary.innerHTML = filterText + originalText;
                 }
@@ -1080,17 +1067,7 @@ DASHBOARD_TEMPLATE = """
             const clientsList = document.getElementById('clients-list');
             if (!clientsList) return;
             
-            clientsList.innerHTML = clients.map(client => `
-                <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                        <strong>${client.name}</strong>
-                        <input type="text" value="${client.url || ''}" class="form-control" style="width: 300px;" 
-                               id="client-url-${client.id}" placeholder="https://client-website.com">
-                        <button class="btn btn-small btn-success" onclick="updateClientUrl(${client.id})">Update URL</button>
-                        <button class="btn btn-small" style="background: #ef4444;" onclick="deleteClient(${client.id})">Delete</button>
-                    </div>
-                </div>
-            `).join('');
+            clientsList.innerHTML = clients.map(client => '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;"><div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;"><strong>' + client.name + '</strong><input type="text" value="' + (client.url || '') + '" class="form-control" style="width: 300px;" id="client-url-' + client.id + '" placeholder="https://client-website.com"><button class="btn btn-small btn-success" onclick="updateClientUrl(' + client.id + ')">Update URL</button><button class="btn btn-small" style="background: #ef4444;" onclick="deleteClient(' + client.id + ')">Delete</button></div></div>').join('');
         }
         
         async function addNewClient() {
@@ -1117,10 +1094,10 @@ DASHBOARD_TEMPLATE = """
                     loadClientsForModal(); // Refresh the list
                     alert('Client added successfully!');
                 } else {
-                    alert(`Error: ${result.message}`);
+                    alert('Error: ' + result.message);
                 }
             } catch (error) {
-                alert(`Error adding client: ${error.message}`);
+                alert('Error adding client: ' + error.message);
             }
         }
         
@@ -1139,10 +1116,10 @@ DASHBOARD_TEMPLATE = """
                 if (result.status === 'success') {
                     alert('Client URL updated successfully!');
                 } else {
-                    alert(`Error: ${result.message}`);
+                    alert('Error: ' + result.message);
                 }
             } catch (error) {
-                alert(`Error updating client: ${error.message}`);
+                alert('Error updating client: ' + error.message);
             }
         }
         
@@ -1160,10 +1137,10 @@ DASHBOARD_TEMPLATE = """
                     loadClientsForModal(); // Refresh the list
                     alert('Client deleted successfully!');
                 } else {
-                    alert(`Error: ${result.message}`);
+                    alert('Error: ' + result.message);
                 }
             } catch (error) {
-                alert(`Error deleting client: ${error.message}`);
+                alert('Error deleting client: ' + error.message);
             }
         }
         
@@ -1223,7 +1200,7 @@ DASHBOARD_TEMPLATE = """
                     alert('CSV export is not supported in this browser.');
                 }
             } catch (error) {
-                alert(`Error exporting CSV: ${error.message}`);
+                alert('Error exporting CSV: ' + error.message);
             }
         }
         
@@ -1281,7 +1258,7 @@ DASHBOARD_TEMPLATE = """
         
         function updateDomain(input, domainName, field) {
             // This function can be used for real-time validation if needed
-            console.log(`Updated ${field} for ${domainName}: ${input.value}`);
+            console.log('Updated ' + field + ' for ' + domainName + ': ' + input.value);
         }
         
         async function updateDomainRedirect(input, domainName, field) {
@@ -1313,17 +1290,17 @@ DASHBOARD_TEMPLATE = """
                     const statusCell = row.cells[5]; // Status is in the 6th column (index 5)
                     statusCell.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
                     
-                    console.log(`Domain ${domainName} updated and status set to synced`);
+                    console.log('Domain ' + domainName + ' updated and status set to synced');
                 } else {
                     // Update status to not synced
                     const row = input.closest('tr');
                     const statusCell = row.cells[5];
                     statusCell.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
                     
-                    console.error(`Failed to update ${domainName}: ${result.message}`);
+                    console.error('Failed to update ' + domainName + ': ' + result.message);
                 }
             } catch (error) {
-                console.error(`Error updating domain redirect: ${error.message}`);
+                console.error('Error updating domain redirect: ' + error.message);
                 
                 // Update status to not synced
                 const row = input.closest('tr');
