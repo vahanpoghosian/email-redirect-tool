@@ -199,6 +199,9 @@ DASHBOARD_TEMPLATE = """
     </div>
 
     <script>
+        // Global sync monitoring
+        let syncProgressInterval = null;
+        
         // Simple checkbox select all functionality
         document.addEventListener('DOMContentLoaded', function() {
             const selectAllCheckbox = document.getElementById('select-all');
@@ -210,6 +213,9 @@ DASHBOARD_TEMPLATE = """
                     });
                 });
             }
+            
+            // Start sync progress monitoring if sync is already running
+            checkSyncStatus();
             
             // Collect selected domains for bulk update
             function collectSelectedDomains() {
@@ -1006,6 +1012,11 @@ DASHBOARD_TEMPLATE = """
                         progressFill.style.width = '10%';
                         progressFill.style.background = '#3b82f6';
                     }
+                    
+                    // Start progress monitoring after a short delay
+                    setTimeout(function() {
+                        startSyncProgressMonitoring();
+                    }, 1000);
                 });
             }
         });
@@ -1169,6 +1180,105 @@ DASHBOARD_TEMPLATE = """
             // Simple column filter - will be enhanced
             alert('Column filter functionality - Coming soon!');
         }
+        
+        // Sync progress monitoring functions
+        function startSyncProgressMonitoring() {
+            if (syncProgressInterval) {
+                clearInterval(syncProgressInterval);
+            }
+            
+            syncProgressInterval = setInterval(updateSyncProgress, 2000); // Check every 2 seconds
+        }
+        
+        async function updateSyncProgress() {
+            try {
+                const response = await fetch('/api/sync-domains-progress');
+                const data = await response.json();
+                
+                const progressDiv = document.getElementById('sync-progress');
+                const progressText = document.getElementById('sync-progress-text');
+                const progressFill = document.getElementById('sync-progress-fill');
+                const syncStatus = document.getElementById('sync-status');
+                
+                if (progressDiv && progressText && progressFill) {
+                    if (data.status === 'running') {
+                        progressDiv.style.display = 'block';
+                        
+                        // Calculate progress percentage
+                        const percentage = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+                        progressFill.style.width = percentage + '%';
+                        progressFill.style.background = '#3b82f6';
+                        
+                        // Update progress text
+                        let statusText = `Processing ${data.processed}/${data.total} domains`;
+                        if (data.current_domain) {
+                            statusText += ` (${data.current_domain})`;
+                        }
+                        progressText.textContent = statusText;
+                        
+                        // Update status with summary
+                        if (syncStatus) {
+                            syncStatus.innerHTML = `
+                                <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.5rem;">
+                                    Added: ${data.domains_added} | Updated: ${data.domains_updated} | Errors: ${data.errors.length}
+                                </div>
+                            `;
+                        }
+                        
+                    } else if (data.status === 'completed') {
+                        progressFill.style.width = '100%';
+                        progressFill.style.background = '#10b981';
+                        progressText.textContent = `Sync completed! Added ${data.domains_added}, updated ${data.domains_updated} domains`;
+                        
+                        if (syncStatus) {
+                            syncStatus.innerHTML = `
+                                <div style="font-size: 0.875rem; color: #10b981; margin-top: 0.5rem;">
+                                    ✅ Sync completed successfully! ${data.errors.length > 0 ? data.errors.length + ' errors occurred.' : ''}
+                                </div>
+                            `;
+                        }
+                        
+                        // Stop monitoring and reload page after delay
+                        clearInterval(syncProgressInterval);
+                        setTimeout(function() {
+                            location.reload();
+                        }, 3000);
+                        
+                    } else if (data.status === 'error') {
+                        progressFill.style.width = '100%';
+                        progressFill.style.background = '#ef4444';
+                        progressText.textContent = 'Sync failed: ' + (data.error || 'Unknown error');
+                        
+                        if (syncStatus) {
+                            syncStatus.innerHTML = `
+                                <div style="font-size: 0.875rem; color: #ef4444; margin-top: 0.5rem;">
+                                    ❌ Sync failed. Please try again.
+                                </div>
+                            `;
+                        }
+                        
+                        clearInterval(syncProgressInterval);
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching sync progress:', error);
+            }
+        }
+        
+        // Check if sync is already running on page load
+        async function checkSyncStatus() {
+            try {
+                const response = await fetch('/api/sync-domains-progress');
+                const data = await response.json();
+                
+                if (data.status === 'running') {
+                    startSyncProgressMonitoring();
+                }
+            } catch (error) {
+                // Ignore errors on initial check
+                console.log('No active sync found');
+            }
+        }
     </script>
 </body>
 </html>
@@ -1286,20 +1396,53 @@ sync_progress = {
 import threading
 import time
 
-def background_sync_task(namecheap_domains):
-    """Background task to sync domains with progress tracking"""
+def background_sync_with_rate_limiting():
+    """Background sync with improved rate limiting and error handling"""
     global sync_progress
     
     try:
         sync_progress["status"] = "running"
-        sync_progress["total"] = len(namecheap_domains)
-        sync_progress["processed"] = 0
-        sync_progress["domains_added"] = 0
-        sync_progress["domains_updated"] = 0
-        sync_progress["errors"] = []
         
+        # Store existing domain numbers before clearing
+        existing_domains = db.get_all_domains_with_redirections()
+        domain_numbers = {d['domain_name']: d['domain_number'] for d in existing_domains}
+        
+        # Clear existing domains from database
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM redirections')
+            cursor.execute('DELETE FROM domains WHERE id NOT IN (SELECT DISTINCT client_id FROM domains WHERE client_id IS NOT NULL)')
+            conn.commit()
+        
+        # Get all domains from Namecheap with retry logic
+        namecheap_domains = []
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            try:
+                namecheap_domains = email_manager.get_all_domains()
+                if namecheap_domains:
+                    break
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"Retrying domain list fetch ({retry_count}/{max_retries})...")
+                    time.sleep(5)  # Wait 5 seconds before retry
+            except Exception as e:
+                retry_count += 1
+                print(f"Error fetching domains (attempt {retry_count}): {e}")
+                if retry_count < max_retries:
+                    time.sleep(10)  # Wait longer on error
+        
+        if not namecheap_domains:
+            sync_progress["status"] = "error"
+            sync_progress["error"] = "No domains found in Namecheap after retries"
+            return
+        
+        sync_progress["total"] = len(namecheap_domains)
         print(f"🔄 Starting background sync of {sync_progress['total']} domains...")
         
+        # Process domains with aggressive rate limiting
         for i, domain_name in enumerate(namecheap_domains, 1):
             sync_progress["processed"] = i
             sync_progress["current_domain"] = domain_name
@@ -1307,52 +1450,106 @@ def background_sync_task(namecheap_domains):
             try:
                 print(f"Processing {i}/{sync_progress['total']}: {domain_name}")
                 
-                # Check if domain exists
-                existing_domain_id = db.get_domain_id(domain_name)
-                
-                if existing_domain_id:
-                    # Domain exists, just update timestamp
-                    domain_number = db.add_or_update_domain(domain_name)
+                # Add domain with preserved number or new number
+                if domain_name in domain_numbers:
+                    # Update the domain with preserved number
+                    with db.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT INTO domains (domain_number, domain_name, client_id)
+                            VALUES (?, ?, (SELECT id FROM clients WHERE client_name = 'Unassigned'))
+                        ''', (domain_numbers[domain_name], domain_name))
+                        conn.commit()
                     sync_progress["domains_updated"] += 1
                 else:
-                    # New domain, add it
-                    domain_number = db.add_or_update_domain(domain_name)
+                    # New domain gets new number
+                    db.add_or_update_domain(domain_name)
                     sync_progress["domains_added"] += 1
                 
-                # Get redirections for this domain and set sync status
-                try:
-                    redirections = email_manager.api_client.get_domain_redirections(domain_name)
-                    if redirections:
-                        db.update_redirections(domain_name, redirections)
-                        db.update_domain_sync_status(domain_name, 'synced')
-                        print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
-                    else:
-                        # No redirections found, but sync was successful
-                        db.update_domain_sync_status(domain_name, 'synced')
-                        print(f"  ℹ️ No redirections found for {domain_name}")
-                except Exception as redirect_error:
-                    print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
-                    db.update_domain_sync_status(domain_name, 'not_synced')
-                    sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
+                # Get redirections with retry logic for rate limits
+                redirections_fetched = False
+                redirect_retry = 0
+                max_redirect_retries = 3
                 
-                # Add delay to avoid rate limiting - scale with domain count
-                if i > 100:  # After 100 domains, much longer delays
-                    time.sleep(4)
-                elif i > 50:  # After 50 domains, longer delays  
-                    time.sleep(3)
+                while redirect_retry < max_redirect_retries and not redirections_fetched:
+                    try:
+                        redirections = email_manager.api_client.get_domain_redirections(domain_name)
+                        redirections_fetched = True
+                        
+                        if redirections:
+                            db.update_redirections(domain_name, redirections)
+                            db.update_domain_sync_status(domain_name, 'synced')
+                            print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
+                        else:
+                            db.update_domain_sync_status(domain_name, 'synced')
+                            print(f"  ℹ️ No redirections found for {domain_name}")
+                            
+                    except Exception as redirect_error:
+                        redirect_retry += 1
+                        error_msg = str(redirect_error)
+                        
+                        # Check for various rate limiting indicators
+                        is_rate_limited = (
+                            "too many requests" in error_msg.lower() or 
+                            "rate limit" in error_msg.lower() or 
+                            "connection/timeout error" in error_msg.lower() or
+                            "502" in error_msg or "503" in error_msg or "504" in error_msg  # Server errors that might indicate overload
+                        )
+                        
+                        if is_rate_limited:
+                            if redirect_retry < max_redirect_retries:
+                                wait_time = min(15 * redirect_retry, 60)  # Cap at 60 seconds max wait
+                                print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {redirect_retry})")
+                                time.sleep(wait_time)
+                                continue
+                            else:
+                                print(f"  ❌ Max retries reached for {domain_name}: {redirect_error}")
+                                db.update_domain_sync_status(domain_name, 'not_synced')
+                                sync_progress["errors"].append(f"{domain_name}: Rate limit exceeded after {max_redirect_retries} retries")
+                        else:
+                            print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
+                            db.update_domain_sync_status(domain_name, 'not_synced')
+                            sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
+                            break
+                
+                # Progressive delay based on errors and position
+                base_delay = 2
+                if len(sync_progress["errors"]) > 5:  # Many errors, slow down more
+                    base_delay = 8
+                elif len(sync_progress["errors"]) > 2:
+                    base_delay = 5
+                
+                if i > 50:  # After 50 domains, longer delays
+                    base_delay += 3
                 elif i > 20:  # After 20 domains, medium delays
-                    time.sleep(2)
-                else:  # First 20 domains, shorter delays
-                    time.sleep(1)
+                    base_delay += 1
+                
+                time.sleep(base_delay)
                     
             except Exception as e:
                 print(f"Error syncing domain {domain_name}: {e}")
                 sync_progress["errors"].append(f"{domain_name}: {str(e)}")
+                # Still add the domain to database even if redirect fetch failed
+                try:
+                    if domain_name in domain_numbers:
+                        with db.get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                INSERT INTO domains (domain_number, domain_name, client_id)
+                                VALUES (?, ?, (SELECT id FROM clients WHERE client_name = 'Unassigned'))
+                            ''', (domain_numbers[domain_name], domain_name))
+                            conn.commit()
+                    else:
+                        db.add_or_update_domain(domain_name)
+                    db.update_domain_sync_status(domain_name, 'not_synced')
+                except Exception as db_error:
+                    print(f"Error adding domain {domain_name} to database: {db_error}")
+                
                 continue
         
         sync_progress["status"] = "completed"
         sync_progress["current_domain"] = ""
-        print(f"✅ Background sync completed: {sync_progress['domains_added']} added, {sync_progress['domains_updated']} updated")
+        print(f"✅ Background sync completed: {sync_progress['domains_added']} added, {sync_progress['domains_updated']} updated, {len(sync_progress['errors'])} errors")
         
     except Exception as e:
         print(f"❌ Background sync failed: {e}")
@@ -2086,52 +2283,21 @@ def sync_domains_form():
         if not email_manager:
             return "Email manager not initialized", 503
         
-        # Store existing domain numbers before clearing
-        existing_domains = db.get_all_domains_with_redirections()
-        domain_numbers = {d['domain_name']: d['domain_number'] for d in existing_domains}
+        # Start background sync task
+        global sync_progress
+        sync_progress = {
+            "status": "starting",
+            "processed": 0,
+            "total": 0,
+            "current_domain": "",
+            "domains_added": 0,
+            "domains_updated": 0,
+            "errors": []
+        }
         
-        # Clear existing domains from database
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM redirections')
-            cursor.execute('DELETE FROM domains WHERE id NOT IN (SELECT DISTINCT client_id FROM domains WHERE client_id IS NOT NULL)')
-            conn.commit()
-        
-        # Get all domains from Namecheap
-        namecheap_domains = email_manager.get_all_domains()
-        
-        if not namecheap_domains:
-            return "No domains found in Namecheap", 404
-        
-        # Sync domains and preserve numbers
-        for domain_name in namecheap_domains:
-            try:
-                # Get redirections
-                redirections = email_manager.api_client.get_domain_redirections(domain_name)
-                
-                # Add domain with preserved number or new number
-                if domain_name in domain_numbers:
-                    # Update the domain with preserved number
-                    with db.get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            INSERT INTO domains (domain_number, domain_name, client_id)
-                            VALUES (?, ?, (SELECT id FROM clients WHERE client_name = 'Unassigned'))
-                        ''', (domain_numbers[domain_name], domain_name))
-                else:
-                    # New domain gets new number
-                    db.add_or_update_domain(domain_name)
-                
-                # Update redirections
-                if redirections:
-                    db.update_redirections(domain_name, redirections)
-                    db.update_domain_sync_status(domain_name, 'synced')
-                else:
-                    db.update_domain_sync_status(domain_name, 'synced')
-                    
-            except Exception as e:
-                print(f"Error syncing {domain_name}: {e}")
-                db.update_domain_sync_status(domain_name, 'not_synced')
+        sync_thread = threading.Thread(target=background_sync_with_rate_limiting)
+        sync_thread.daemon = True
+        sync_thread.start()
         
         return redirect(url_for('dashboard'))
         
