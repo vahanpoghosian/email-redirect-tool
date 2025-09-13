@@ -172,7 +172,7 @@ DASHBOARD_TEMPLATE = """
                 document.getElementById('raw-data').style.display = 'block';
                 
             } catch (error) {
-                alert(`Error loading domains: ${error.message}`);
+                alert('Error loading domains: ' + error.message);
             } finally {
                 document.getElementById('loading').style.display = 'none';
             }
@@ -184,7 +184,7 @@ DASHBOARD_TEMPLATE = """
             isLoading = true;
             
             try {
-                const response = await fetch(`/api/domains-batch?page=${page}&per_page=${domainsPerPage}`);
+                const response = await fetch('/api/domains-batch?page=' + page + '&per_page=' + domainsPerPage);
                 const data = await response.json();
                 
                 if (data.status === 'success') {
@@ -208,10 +208,10 @@ DASHBOARD_TEMPLATE = """
                     }
                     
                 } else {
-                    alert(`Error: ${data.message}`);
+                    alert('Error: ' + data.message);
                 }
             } catch (error) {
-                alert(`Error loading domain batch: ${error.message}`);
+                alert('Error loading domain batch: ' + error.message);
             } finally {
                 isLoading = false;
             }
@@ -235,12 +235,11 @@ DASHBOARD_TEMPLATE = """
             const totalDomains = allDomains.length;
             const domainsWithRedirects = allDomains.filter(d => d.redirections && d.redirections.length > 0).length;
             
-            summary.innerHTML = `
-                <div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div><strong>Total Domains:</strong> ${totalDomains}</div>
-                    <div><strong>Domains with Redirects:</strong> ${domainsWithRedirects}</div>
-                </div>
-            `;
+            summary.innerHTML = 
+                '<div style="display: flex; gap: 2rem; margin-bottom: 1rem; flex-wrap: wrap;">' +
+                    '<div><strong>Total Domains:</strong> ' + totalDomains + '</div>' +
+                    '<div><strong>Domains with Redirects:</strong> ' + domainsWithRedirects + '</div>' +
+                '</div>';
             
             // Add all domains to table
             allDomains.forEach((domain, domainIndex) => {
@@ -783,34 +782,24 @@ DASHBOARD_TEMPLATE = """
             
             // Checkbox for bulk selection
             const checkboxCell = row.insertCell(0);
-            checkboxCell.innerHTML = `
-                <input type="checkbox" class="domain-checkbox" value="${domain.domain_name}" onchange="updateBulkButtonState()">
-            `;
+            checkboxCell.innerHTML = '<input type="checkbox" class="domain-checkbox" value="' + domain.domain_name + '" onchange="updateBulkButtonState()">';
             
             // Domain number
             const numberCell = row.insertCell(1);
-            numberCell.innerHTML = `<strong>#${domain.domain_number || 'N/A'}</strong>`;
+            numberCell.innerHTML = '<strong>#' + (domain.domain_number || 'N/A') + '</strong>';
             
             // Domain name (editable)
             const domainCell = row.insertCell(2);
-            domainCell.innerHTML = `
-                <input type="text" value="${domain.domain_name}" class="form-control" onchange="updateDomain(this, '${domain.domain_name}', 'domain')">
-            `;
+            domainCell.innerHTML = '<input type="text" value="' + domain.domain_name + '" class="form-control" onchange="updateDomain(this, \'' + domain.domain_name + '\', \'domain\')">';
             
             // Redirect target (editable)
             const redirectCell = row.insertCell(3);
             const redirectTarget = redirect ? redirect.target : '';
-            redirectCell.innerHTML = `
-                <input type="text" value="${redirectTarget}" class="form-control" placeholder="https://example.com" onchange="updateDomainRedirect(this, '${domain.domain_name}', 'redirect')">
-            `;
+            redirectCell.innerHTML = '<input type="text" value="' + redirectTarget + '" class="form-control" placeholder="https://example.com" onchange="updateDomainRedirect(this, \'' + domain.domain_name + '\', \'redirect\')">';
             
             // Client dropdown
             const clientCell = row.insertCell(4);
-            clientCell.innerHTML = `
-                <select class="form-control" onchange="updateDomainClient(this, '${domain.domain_name}')" id="client-${domain.domain_name.replace(/\./g, '-')}">
-                    <option value="">Unassigned</option>
-                </select>
-            `;
+            clientCell.innerHTML = '<select class="form-control" onchange="updateDomainClient(this, \'' + domain.domain_name + '\')" id="client-' + domain.domain_name.replace(/\./g, '-') + '"><option value="">Unassigned</option></select>';
             
             // Load clients into dropdown
             loadClientsIntoDropdown(domain.domain_name, domain.client_id);
@@ -832,7 +821,7 @@ DASHBOARD_TEMPLATE = """
                 statusColor = '#6b7280'; // Gray
             }
             
-            statusCell.innerHTML = `<span style="color: ${statusColor}; font-weight: 600;">${statusHtml}</span>`;
+            statusCell.innerHTML = '<span style="color: ' + statusColor + '; font-weight: 600;">' + statusHtml + '</span>';
         }
         
         function createDomainsCard() {
@@ -840,53 +829,52 @@ DASHBOARD_TEMPLATE = """
             const domainsCard = document.createElement('div');
             domainsCard.className = 'card';
             domainsCard.id = 'domains-view';
-            domainsCard.innerHTML = `
-                <h2>All Domains with URL Redirections</h2>
-                <div id="domains-summary"></div>
-                <div style="margin: 1rem 0; display: flex; gap: 0.5rem; align-items: center;">
-                    <button class="btn" onclick="clearAllFilters()" style="background: #6b7280;">Clear All Filters</button>
-                </div>
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>
-                                <input type="checkbox" id="select-all-domains" onclick="toggleAllDomains(this)">
-                            </th>
-                            <th>Number</th>
-                            <th>Domain</th>
-                            <th>Redirect Target</th>
-                            <th>Client</th>
-                            <th>Status</th>
-                        </tr>
-                        <tr style="background: #f8fafc;">
-                            <th></th>
-                            <th>
-                                <input type="text" class="form-control" id="number-filter" placeholder="Filter #..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
-                            </th>
-                            <th>
-                                <input type="text" class="form-control" id="domain-filter" placeholder="Filter domains..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
-                            </th>
-                            <th>
-                                <input type="text" class="form-control" id="redirect-filter" placeholder="Filter redirects..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
-                            </th>
-                            <th>
-                                <select class="form-control" id="client-filter" onchange="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
-                                    <option value="">All Clients</option>
-                                </select>
-                            </th>
-                            <th>
-                                <select class="form-control" id="status-filter" onchange="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
-                                    <option value="">All Status</option>
-                                    <option value="synced">Synced</option>
-                                    <option value="not_synced">Not Synced</option>
-                                    <option value="unchanged">Unchanged</option>
-                                </select>
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody id="domains-tbody"></tbody>
-                </table>
-            `;
+            domainsCard.innerHTML = 
+                '<h2>All Domains with URL Redirections</h2>' +
+                '<div id="domains-summary"></div>' +
+                '<div style="margin: 1rem 0; display: flex; gap: 0.5rem; align-items: center;">' +
+                    '<button class="btn" onclick="clearAllFilters()" style="background: #6b7280;">Clear All Filters</button>' +
+                '</div>' +
+                '<table class="table">' +
+                    '<thead>' +
+                        '<tr>' +
+                            '<th>' +
+                                '<input type="checkbox" id="select-all-domains" onclick="toggleAllDomains(this)">' +
+                            '</th>' +
+                            '<th>Number</th>' +
+                            '<th>Domain</th>' +
+                            '<th>Redirect Target</th>' +
+                            '<th>Client</th>' +
+                            '<th>Status</th>' +
+                        '</tr>' +
+                        '<tr style="background: #f8fafc;">' +
+                            '<th></th>' +
+                            '<th>' +
+                                '<input type="text" class="form-control" id="number-filter" placeholder="Filter #..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">' +
+                            '</th>' +
+                            '<th>' +
+                                '<input type="text" class="form-control" id="domain-filter" placeholder="Filter domains..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">' +
+                            '</th>' +
+                            '<th>' +
+                                '<input type="text" class="form-control" id="redirect-filter" placeholder="Filter redirects..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">' +
+                            '</th>' +
+                            '<th>' +
+                                '<select class="form-control" id="client-filter" onchange="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">' +
+                                    '<option value="">All Clients</option>' +
+                                '</select>' +
+                            '</th>' +
+                            '<th>' +
+                                '<select class="form-control" id="status-filter" onchange="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">' +
+                                    '<option value="">All Status</option>' +
+                                    '<option value="synced">Synced</option>' +
+                                    '<option value="not_synced">Not Synced</option>' +
+                                    '<option value="unchanged">Unchanged</option>' +
+                                '</select>' +
+                            '</th>' +
+                        '</tr>' +
+                    '</thead>' +
+                    '<tbody id="domains-tbody"></tbody>' +
+                '</table>';
             container.appendChild(domainsCard);
             return domainsCard;
         }
