@@ -85,9 +85,6 @@ DASHBOARD_TEMPLATE = """
                 <form method="POST" action="/sync-domains" style="display: inline;">
                     <button class="btn btn-success" type="submit">🔄 Sync All Domains from Namecheap</button>
                 </form>
-                <form method="POST" action="/load-domains" style="display: inline;">
-                    <button class="btn" type="submit">📊 Load Domains from Database</button>
-                </form>
                 <button class="btn" onclick="showBulkUpdateModal()" id="bulk-update-btn">🔧 Bulk Update</button>
                 <button class="btn" onclick="showClientModal()">👥 Manage Clients</button>
                 <form method="POST" action="/export-csv" style="display: inline;">
@@ -120,16 +117,11 @@ DASHBOARD_TEMPLATE = """
                     </tr>
                     <tr style="background: #f8fafc;">
                         <th></th>
-                        <th><input type="text" class="form-control" placeholder="Filter #..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
-                        <th><input type="text" class="form-control" placeholder="Filter domains..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
-                        <th><input type="text" class="form-control" placeholder="Filter redirects..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
-                        <th><input type="text" class="form-control" placeholder="Filter clients..." style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onkeyup="filterTable()"></th>
-                        <th><select class="form-control" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;" onchange="filterTable()">
-                                <option value="">All Status</option>
-                                <option value="synced">Synced</option>
-                                <option value="not_synced">Not Synced</option>
-                                <option value="unchanged">Unchanged</option>
-                            </select></th>
+                        <th><div style="position: relative;"><span onclick="showColumnFilter(1)" style="cursor: pointer;">🔄</span></div></th>
+                        <th><div style="position: relative;"><span onclick="showColumnFilter(2)" style="cursor: pointer;">🔄</span></div></th>
+                        <th><div style="position: relative;"><span onclick="showColumnFilter(3)" style="cursor: pointer;">🔄</span></div></th>
+                        <th><div style="position: relative;"><span onclick="showColumnFilter(4)" style="cursor: pointer;">🔄</span></div></th>
+                        <th><div style="position: relative;"><span onclick="showColumnFilter(5)" style="cursor: pointer;">🔄</span></div></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -147,7 +139,14 @@ DASHBOARD_TEMPLATE = """
                                         <button type="submit" class="btn btn-small btn-success">Save</button>
                                     </form>
                                 </td>
-                                <td>{{ domain.client_name or 'Unassigned' }}</td>
+                                <td>
+                                    <select class="form-control" onchange="updateDomainClient('{{ domain.domain_name }}', this.value)" style="width: 100%;">
+                                        <option value="" {% if not domain.client_id %}selected{% endif %}>Unassigned</option>
+                                        {% for client in clients %}
+                                            <option value="{{ client.id }}" {% if client.id == domain.client_id %}selected{% endif %}>{{ client.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
                                 <td>
                                     {% if domain.sync_status == 'synced' %}
                                         <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
@@ -171,7 +170,14 @@ DASHBOARD_TEMPLATE = """
                                         <button type="submit" class="btn btn-small btn-success">Save</button>
                                     </form>
                                 </td>
-                                <td>{{ domain.client_name or 'Unassigned' }}</td>
+                                <td>
+                                    <select class="form-control" onchange="updateDomainClient('{{ domain.domain_name }}', this.value)" style="width: 100%;">
+                                        <option value="" {% if not domain.client_id %}selected{% endif %}>Unassigned</option>
+                                        {% for client in clients %}
+                                            <option value="{{ client.id }}" {% if client.id == domain.client_id %}selected{% endif %}>{{ client.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
                                 <td>
                                     {% if domain.sync_status == 'synced' %}
                                         <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
@@ -807,13 +813,35 @@ DASHBOARD_TEMPLATE = """
                 'align-items: center; justify-content: center;';
             
             const hiddenInputs = selectedDomains.map(domain => '<input type="hidden" name="selected_domains" value="' + domain + '">').join('');
+            const domainsList = selectedDomains.map(domain => '<li>' + domain + '</li>').join('');
+            
             modal.innerHTML = 
-                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 500px;">' +
+                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">' +
                     '<h2>Bulk Update ' + selectedDomains.length + ' Domains</h2>' +
+                    '<div style="margin: 1rem 0; max-height: 200px; overflow-y: auto; border: 1px solid #e5e7eb; padding: 1rem; border-radius: 4px;">' +
+                        '<h4>Selected Domains:</h4>' +
+                        '<ul style="margin: 0; padding-left: 1rem;">' + domainsList + '</ul>' +
+                    '</div>' +
                     '<form method="POST" action="/bulk-update" style="margin-top: 1rem;">' +
                         '<div style="margin-bottom: 1rem;">' +
+                            '<label>Choose Option:</label>' +
+                            '<div style="margin: 0.5rem 0;">' +
+                                '<input type="radio" id="manual-url" name="update-type" value="manual" checked onchange="toggleBulkInputs()"> ' +
+                                '<label for="manual-url">Manual URL Entry</label>' +
+                            '</div>' +
+                            '<div style="margin: 0.5rem 0;">' +
+                                '<input type="radio" id="client-url" name="update-type" value="client" onchange="toggleBulkInputs()"> ' +
+                                '<label for="client-url">Select Client</label>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div id="manual-input" style="margin-bottom: 1rem;">' +
                             '<label>New Redirect Target:</label>' +
-                            '<input type="text" name="bulk_target" class="form-control" placeholder="https://example.com" required style="width: 100%; margin-top: 0.5rem;">' +
+                            '<input type="text" name="bulk_target" class="form-control" placeholder="https://example.com" style="width: 100%; margin-top: 0.5rem;">' +
+                        '</div>' +
+                        '<div id="client-input" style="margin-bottom: 1rem; display: none;">' +
+                            '<label>Select Client:</label>' +
+                            '<select name="bulk_client" class="form-control" style="width: 100%; margin-top: 0.5rem;" onchange="updateBulkPreview()"></select>' +
+                            '<div id="client-url-preview" style="margin-top: 0.5rem; font-style: italic; color: #666;"></div>' +
                         '</div>' +
                         hiddenInputs +
                         '<div style="display: flex; gap: 1rem; justify-content: flex-end;">' +
@@ -825,6 +853,9 @@ DASHBOARD_TEMPLATE = """
             
             modal.id = 'bulk-modal';
             document.body.appendChild(modal);
+            
+            // Load clients for dropdown
+            loadClientsForBulk();
             
             // Close modal when clicking outside
             modal.addEventListener('click', (e) => {
@@ -850,9 +881,26 @@ DASHBOARD_TEMPLATE = """
                 'align-items: center; justify-content: center;';
             
             modal.innerHTML = 
-                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">' +
+                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80%; overflow-y: auto;">' +
                     '<h2>Manage Clients</h2>' +
-                    '<p>Client management functionality - Coming soon!</p>' +
+                    '<div style="margin: 1rem 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 1rem;">' +
+                        '<h3>Add New Client</h3>' +
+                        '<form method="POST" action="/add-client" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">' +
+                            '<div>' +
+                                '<label>Client Name:</label>' +
+                                '<input type="text" name="client_name" class="form-control" placeholder="Client Name" required style="width: 200px;">' +
+                            '</div>' +
+                            '<div>' +
+                                '<label>Target URL:</label>' +
+                                '<input type="text" name="client_url" class="form-control" placeholder="https://client-website.com" style="width: 300px;">' +
+                            '</div>' +
+                            '<button type="submit" class="btn btn-success">Add Client</button>' +
+                        '</form>' +
+                    '</div>' +
+                    '<div style="margin: 1rem 0;">' +
+                        '<h3>Existing Clients</h3>' +
+                        '<div id="clients-list-container">Loading clients...</div>' +
+                    '</div>' +
                     '<div style="margin-top: 2rem; text-align: right;">' +
                         '<button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>' +
                     '</div>' +
@@ -860,6 +908,9 @@ DASHBOARD_TEMPLATE = """
             
             modal.id = 'client-modal';
             document.body.appendChild(modal);
+            
+            // Load existing clients
+            loadExistingClients();
             
             // Close modal when clicking outside
             modal.addEventListener('click', (e) => {
@@ -958,6 +1009,166 @@ DASHBOARD_TEMPLATE = """
                 });
             }
         });
+        
+        // Toggle bulk update inputs
+        function toggleBulkInputs() {
+            const manualRadio = document.getElementById('manual-url');
+            const manualInput = document.getElementById('manual-input');
+            const clientInput = document.getElementById('client-input');
+            
+            if (manualRadio.checked) {
+                manualInput.style.display = 'block';
+                clientInput.style.display = 'none';
+            } else {
+                manualInput.style.display = 'none';
+                clientInput.style.display = 'block';
+            }
+        }
+        
+        // Load clients for bulk update
+        async function loadClientsForBulk() {
+            try {
+                const response = await fetch('/api/clients');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const select = document.querySelector('select[name="bulk_client"]');
+                    select.innerHTML = '<option value="">Choose a client...</option>';
+                    data.clients.forEach(client => {
+                        const option = document.createElement('option');
+                        option.value = client.id;
+                        option.textContent = client.name;
+                        option.setAttribute('data-url', client.url || '');
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading clients:', error);
+            }
+        }
+        
+        // Update bulk preview URL
+        function updateBulkPreview() {
+            const select = document.querySelector('select[name="bulk_client"]');
+            const preview = document.getElementById('client-url-preview');
+            const selectedOption = select.selectedOptions[0];
+            
+            if (selectedOption && selectedOption.getAttribute('data-url')) {
+                preview.textContent = 'Target URL: ' + selectedOption.getAttribute('data-url');
+            } else {
+                preview.textContent = '';
+            }
+        }
+        
+        // Load existing clients for management modal
+        async function loadExistingClients() {
+            try {
+                const response = await fetch('/api/clients');
+                const data = await response.json();
+                
+                const container = document.getElementById('clients-list-container');
+                if (data.status === 'success' && data.clients.length > 0) {
+                    container.innerHTML = data.clients.map(client => 
+                        '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">' +
+                            '<div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">' +
+                                '<strong>' + client.name + '</strong>' +
+                                '<input type="text" value="' + (client.url || '') + '" class="form-control" style="width: 300px;" id="client-url-' + client.id + '" placeholder="https://client-website.com">' +
+                                '<button class="btn btn-small btn-success" onclick="updateClientUrl(' + client.id + ')">Update URL</button>' +
+                                '<button class="btn btn-small" style="background: #ef4444;" onclick="deleteClient(' + client.id + ')">Delete</button>' +
+                            '</div>' +
+                        '</div>'
+                    ).join('');
+                } else {
+                    container.innerHTML = '<p>No clients found. Add some clients to get started.</p>';
+                }
+            } catch (error) {
+                document.getElementById('clients-list-container').innerHTML = '<p>Error loading clients.</p>';
+            }
+        }
+        
+        // Update client URL
+        async function updateClientUrl(clientId) {
+            const urlInput = document.getElementById('client-url-' + clientId);
+            const url = urlInput.value.trim();
+            
+            try {
+                const response = await fetch('/api/clients/' + clientId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert('Client URL updated successfully!');
+                    location.reload(); // Refresh to update dropdowns
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error updating client: ' + error.message);
+            }
+        }
+        
+        // Delete client
+        async function deleteClient(clientId) {
+            if (!confirm('Are you sure you want to delete this client?')) return;
+            
+            try {
+                const response = await fetch('/api/clients/' + clientId, { method: 'DELETE' });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert('Client deleted successfully!');
+                    loadExistingClients(); // Refresh the list
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting client: ' + error.message);
+            }
+        }
+        
+        // Update domain client assignment
+        async function updateDomainClient(domainName, clientId) {
+            if (!clientId) return; // Don't update if no client selected
+            
+            try {
+                const response = await fetch('/api/assign-client', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain_name: domainName, client_id: clientId })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    // Find the client URL and populate redirect field
+                    const clients = await fetch('/api/clients').then(r => r.json());
+                    if (clients.status === 'success') {
+                        const client = clients.clients.find(c => c.id == clientId);
+                        if (client && client.url) {
+                            // Find the redirect input in the same row
+                            const select = document.querySelector('select[onchange*="' + domainName + '"]');
+                            if (select) {
+                                const row = select.closest('tr');
+                                const redirectInput = row.querySelector('input[name="target"]');
+                                if (redirectInput) {
+                                    redirectInput.value = client.url;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating domain client:', error);
+            }
+        }
+        
+        // Show column filter
+        function showColumnFilter(columnIndex) {
+            // Simple column filter - will be enhanced
+            alert('Column filter functionality - Coming soon!');
+        }
     </script>
 </body>
 </html>
@@ -1053,12 +1264,13 @@ def dashboard():
     """Main dashboard"""
     search_query = request.args.get('search', '')
     domains = db.get_all_domains_with_redirections()
+    clients = db.get_all_clients()
     
     # Filter domains if search query
     if search_query:
         domains = [d for d in domains if search_query.lower() in d['domain_name'].lower()]
     
-    return render_template_string(DASHBOARD_TEMPLATE, domains=domains, request=request)
+    return render_template_string(DASHBOARD_TEMPLATE, domains=domains, clients=clients, request=request)
 
 # Global variable to track sync progress
 sync_progress = {
@@ -1874,16 +2086,52 @@ def sync_domains_form():
         if not email_manager:
             return "Email manager not initialized", 503
         
+        # Store existing domain numbers before clearing
+        existing_domains = db.get_all_domains_with_redirections()
+        domain_numbers = {d['domain_name']: d['domain_number'] for d in existing_domains}
+        
+        # Clear existing domains from database
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM redirections')
+            cursor.execute('DELETE FROM domains WHERE id NOT IN (SELECT DISTINCT client_id FROM domains WHERE client_id IS NOT NULL)')
+            conn.commit()
+        
         # Get all domains from Namecheap
         namecheap_domains = email_manager.get_all_domains()
         
         if not namecheap_domains:
             return "No domains found in Namecheap", 404
         
-        # Start background sync task
-        sync_thread = threading.Thread(target=background_sync_task, args=(namecheap_domains,))
-        sync_thread.daemon = True
-        sync_thread.start()
+        # Sync domains and preserve numbers
+        for domain_name in namecheap_domains:
+            try:
+                # Get redirections
+                redirections = email_manager.api_client.get_domain_redirections(domain_name)
+                
+                # Add domain with preserved number or new number
+                if domain_name in domain_numbers:
+                    # Update the domain with preserved number
+                    with db.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT INTO domains (domain_number, domain_name, client_id)
+                            VALUES (?, ?, (SELECT id FROM clients WHERE client_name = 'Unassigned'))
+                        ''', (domain_numbers[domain_name], domain_name))
+                else:
+                    # New domain gets new number
+                    db.add_or_update_domain(domain_name)
+                
+                # Update redirections
+                if redirections:
+                    db.update_redirections(domain_name, redirections)
+                    db.update_domain_sync_status(domain_name, 'synced')
+                else:
+                    db.update_domain_sync_status(domain_name, 'synced')
+                    
+            except Exception as e:
+                print(f"Error syncing {domain_name}: {e}")
+                db.update_domain_sync_status(domain_name, 'not_synced')
         
         return redirect(url_for('dashboard'))
         
@@ -1911,12 +2159,15 @@ def update_redirect_form():
         success = email_manager.api_client.set_domain_redirection(domain, '@', target)
         
         if success:
-            # Update status in UI only (not persisted in database per user request)
+            # Update sync status
+            db.update_domain_sync_status(domain, 'synced')
             return redirect(url_for('dashboard'))
         else:
+            db.update_domain_sync_status(domain, 'not_synced')
             return f"Failed to update redirection for {domain}", 500
             
     except Exception as e:
+        db.update_domain_sync_status(domain, 'not_synced')
         return f"Error updating redirect: {str(e)}", 500
 
 @app.route('/bulk-update', methods=['POST'])
@@ -1925,21 +2176,48 @@ def bulk_update_form():
     """Handle bulk update form submission"""
     try:
         selected_domains = request.form.getlist('selected_domains')
-        bulk_target = request.form.get('bulk_target')
+        update_type = request.form.get('update-type', 'manual')
         
-        if not selected_domains or not bulk_target:
-            return "Selected domains and target URL are required", 400
+        if not selected_domains:
+            return "No domains selected", 400
+        
+        # Determine target URL
+        if update_type == 'client':
+            client_id = request.form.get('bulk_client')
+            if not client_id:
+                return "Client selection required", 400
+            
+            # Get client URL
+            clients = db.get_all_clients()
+            client = next((c for c in clients if c['id'] == int(client_id)), None)
+            if not client or not client['url']:
+                return "Client URL not found", 400
+            
+            bulk_target = client['url']
+            
+            # Also assign domains to this client
+            for domain in selected_domains:
+                db.assign_domain_to_client(domain, int(client_id))
+        else:
+            bulk_target = request.form.get('bulk_target')
+            if not bulk_target:
+                return "Target URL is required", 400
         
         # Process bulk updates
         results = []
         for domain in selected_domains:
             try:
                 success = email_manager.api_client.set_domain_redirection(domain, '@', bulk_target)
+                if success:
+                    db.update_domain_sync_status(domain, 'synced')
+                else:
+                    db.update_domain_sync_status(domain, 'not_synced')
                 results.append({'domain': domain, 'success': success})
                 # Add delay between updates
                 import time
                 time.sleep(0.6)
             except Exception as e:
+                db.update_domain_sync_status(domain, 'not_synced')
                 results.append({'domain': domain, 'success': False, 'error': str(e)})
         
         return redirect(url_for('dashboard'))
@@ -1984,6 +2262,23 @@ def export_csv_form():
         
     except Exception as e:
         return f"Error exporting CSV: {str(e)}", 500
+
+@app.route('/add-client', methods=['POST'])
+@require_auth
+def add_client_form():
+    """Handle add client form submission"""
+    try:
+        client_name = request.form.get('client_name')
+        client_url = request.form.get('client_url')
+        
+        if not client_name:
+            return "Client name is required", 400
+        
+        client_id = db.add_client(client_name, client_url)
+        return redirect(url_for('dashboard'))
+        
+    except Exception as e:
+        return f"Error adding client: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
