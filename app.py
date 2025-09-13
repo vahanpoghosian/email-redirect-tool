@@ -776,22 +776,28 @@ DASHBOARD_TEMPLATE = """
             const row = tbody.insertRow();
             row.className = 'domain-row';
             
+            // Checkbox for bulk selection
+            const checkboxCell = row.insertCell(0);
+            checkboxCell.innerHTML = `
+                <input type="checkbox" class="domain-checkbox" value="${domain.domain_name}" onchange="updateBulkButtonState()">
+            `;
+            
             // Domain number and name (editable)
-            const domainCell = row.insertCell(0);
+            const domainCell = row.insertCell(1);
             domainCell.innerHTML = `
                 <div><strong>#${domain.domain_number || 'N/A'}</strong></div>
                 <input type="text" value="${domain.domain_name}" class="form-control" style="margin: 0.5rem 0;" onchange="updateDomain(this, '${domain.domain_name}', 'domain')">
             `;
             
             // Redirect target (editable)
-            const redirectCell = row.insertCell(1);
+            const redirectCell = row.insertCell(2);
             const redirectTarget = redirect ? redirect.target : '';
             redirectCell.innerHTML = `
-                <input type="text" value="${redirectTarget}" class="form-control" placeholder="https://example.com" onchange="updateDomain(this, '${domain.domain_name}', 'redirect')">
+                <input type="text" value="${redirectTarget}" class="form-control" placeholder="https://example.com" onchange="updateDomainRedirect(this, '${domain.domain_name}', 'redirect')">
             `;
             
             // Client dropdown
-            const clientCell = row.insertCell(2);
+            const clientCell = row.insertCell(3);
             clientCell.innerHTML = `
                 <select class="form-control" onchange="updateDomainClient(this, '${domain.domain_name}')" id="client-${domain.domain_name.replace(/\./g, '-')}">
                     <option value="">Unassigned</option>
@@ -802,7 +808,7 @@ DASHBOARD_TEMPLATE = """
             loadClientsIntoDropdown(domain.domain_name, domain.client_id);
             
             // Status
-            const statusCell = row.insertCell(3);
+            const statusCell = row.insertCell(4);
             const syncStatus = domain.sync_status || 'unchanged';
             let statusHtml = '';
             let statusColor = '';
@@ -832,6 +838,9 @@ DASHBOARD_TEMPLATE = """
                 <table class="table">
                     <thead>
                         <tr>
+                            <th>
+                                <input type="checkbox" id="select-all-domains" onclick="toggleAllDomains(this)">
+                            </th>
                             <th>Domain</th>
                             <th>Redirect Target</th>
                             <th>Client</th>
@@ -843,6 +852,29 @@ DASHBOARD_TEMPLATE = """
             `;
             container.appendChild(domainsCard);
             return domainsCard;
+        }
+        
+        function toggleAllDomains(selectAllCheckbox) {
+            const domainCheckboxes = document.querySelectorAll('.domain-checkbox');
+            domainCheckboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+            });
+            updateBulkButtonState();
+        }
+        
+        function updateBulkButtonState() {
+            const selectedCheckboxes = document.querySelectorAll('.domain-checkbox:checked');
+            const bulkButton = document.querySelector('[onclick="showBulkUpdateModal()"]');
+            
+            if (bulkButton) {
+                if (selectedCheckboxes.length > 0) {
+                    bulkButton.textContent = `🔧 Bulk Update (${selectedCheckboxes.length})`;
+                    bulkButton.style.background = '#3b82f6';
+                } else {
+                    bulkButton.textContent = '🔧 Bulk Update';
+                    bulkButton.style.background = '';
+                }
+            }
         }
         
         function showBulkUpdateModal() {
@@ -1009,8 +1041,57 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
-        function exportRedirections() {
-            alert('Export to CSV functionality - Coming soon! This will export all domain redirections to a CSV file.');
+        async function exportRedirections() {
+            try {
+                // Get all domains data
+                const response = await fetch('/api/domains-from-db');
+                const data = await response.json();
+                
+                if (data.status !== 'success') {
+                    alert('Error loading domains for export');
+                    return;
+                }
+                
+                // Prepare CSV data
+                const csvRows = [];
+                csvRows.push('Domain Number,Domain Name,Redirect Target,Client,Status,Last Updated');
+                
+                data.domains.forEach(domain => {
+                    const domainNumber = domain.domain_number || 'N/A';
+                    const domainName = domain.domain_name || '';
+                    const clientName = domain.client_name || 'Unassigned';
+                    const syncStatus = domain.sync_status || 'unchanged';
+                    const updatedAt = domain.updated_at ? new Date(domain.updated_at).toLocaleDateString() : 'N/A';
+                    
+                    if (domain.redirections && domain.redirections.length > 0) {
+                        domain.redirections.forEach(redirect => {
+                            const target = redirect.target || 'No redirect';
+                            csvRows.push(`${domainNumber},"${domainName}","${target}","${clientName}","${syncStatus}","${updatedAt}"`);
+                        });
+                    } else {
+                        csvRows.push(`${domainNumber},"${domainName}","No redirect","${clientName}","${syncStatus}","${updatedAt}"`);
+                    }
+                });
+                
+                // Create and download CSV file
+                const csvContent = csvRows.join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                
+                if (link.download !== undefined) {
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `domain_redirections_${new Date().toISOString().split('T')[0]}.csv`);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                } else {
+                    alert('CSV export is not supported in this browser.');
+                }
+            } catch (error) {
+                alert(`Error exporting CSV: ${error.message}`);
+            }
         }
         
         async function loadClientsIntoDropdown(domainName, currentClientId) {
@@ -1068,6 +1149,66 @@ DASHBOARD_TEMPLATE = """
         function updateDomain(input, domainName, field) {
             // This function can be used for real-time validation if needed
             console.log(`Updated ${field} for ${domainName}: ${input.value}`);
+        }
+        
+        async function updateDomainRedirect(input, domainName, field) {
+            const newValue = input.value.trim();
+            
+            if (!newValue) {
+                return; // Don't update if empty
+            }
+            
+            try {
+                // Update the redirection on Namecheap
+                const response = await fetch('/api/update-redirection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        domain: domainName,
+                        name: '@',
+                        target: newValue
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    // Update status to synced
+                    const row = input.closest('tr');
+                    const statusCell = row.cells[4]; // Status is in the 5th column (index 4)
+                    statusCell.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
+                    
+                    // Update database status
+                    await fetch('/api/update-domain-status', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            domain: domainName,
+                            status: 'synced'
+                        })
+                    });
+                    
+                    console.log(`Domain ${domainName} updated and status set to synced`);
+                } else {
+                    // Update status to not synced
+                    const row = input.closest('tr');
+                    const statusCell = row.cells[4];
+                    statusCell.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
+                    
+                    console.error(`Failed to update ${domainName}: ${result.message}`);
+                }
+            } catch (error) {
+                console.error(`Error updating domain redirect: ${error.message}`);
+                
+                // Update status to not synced
+                const row = input.closest('tr');
+                const statusCell = row.cells[4];
+                statusCell.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
+            }
         }
         
         
@@ -1954,6 +2095,27 @@ def health_check():
         "service": "email-redirect-tool",
         "timestamp": datetime.now().isoformat()
     })
+
+@app.route('/api/update-domain-status', methods=['POST'])
+@require_auth
+def update_domain_status():
+    """Update the sync status of a domain"""
+    try:
+        data = request.get_json()
+        domain_name = data.get('domain')
+        status = data.get('status')
+        
+        if not domain_name or not status:
+            return jsonify({"status": "error", "message": "Domain name and status are required"}), 400
+        
+        db.update_domain_sync_status(domain_name, status)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Domain status updated to {status}"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
