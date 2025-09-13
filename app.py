@@ -767,6 +767,11 @@ DASHBOARD_TEMPLATE = """
                     createDomainTableRow(domain, null, 0);
                 }
             });
+            
+            // Populate client filter after all domains are loaded
+            setTimeout(() => {
+                populateClientFilter();
+            }, 500);
         }
         
         function createDomainTableRow(domain, redirect, redirectIndex) {
@@ -782,22 +787,25 @@ DASHBOARD_TEMPLATE = """
                 <input type="checkbox" class="domain-checkbox" value="${domain.domain_name}" onchange="updateBulkButtonState()">
             `;
             
-            // Domain number and name (editable)
-            const domainCell = row.insertCell(1);
+            // Domain number
+            const numberCell = row.insertCell(1);
+            numberCell.innerHTML = `<strong>#${domain.domain_number || 'N/A'}</strong>`;
+            
+            // Domain name (editable)
+            const domainCell = row.insertCell(2);
             domainCell.innerHTML = `
-                <div><strong>#${domain.domain_number || 'N/A'}</strong></div>
-                <input type="text" value="${domain.domain_name}" class="form-control" style="margin: 0.5rem 0;" onchange="updateDomain(this, '${domain.domain_name}', 'domain')">
+                <input type="text" value="${domain.domain_name}" class="form-control" onchange="updateDomain(this, '${domain.domain_name}', 'domain')">
             `;
             
             // Redirect target (editable)
-            const redirectCell = row.insertCell(2);
+            const redirectCell = row.insertCell(3);
             const redirectTarget = redirect ? redirect.target : '';
             redirectCell.innerHTML = `
                 <input type="text" value="${redirectTarget}" class="form-control" placeholder="https://example.com" onchange="updateDomainRedirect(this, '${domain.domain_name}', 'redirect')">
             `;
             
             // Client dropdown
-            const clientCell = row.insertCell(3);
+            const clientCell = row.insertCell(4);
             clientCell.innerHTML = `
                 <select class="form-control" onchange="updateDomainClient(this, '${domain.domain_name}')" id="client-${domain.domain_name.replace(/\./g, '-')}">
                     <option value="">Unassigned</option>
@@ -808,7 +816,7 @@ DASHBOARD_TEMPLATE = """
             loadClientsIntoDropdown(domain.domain_name, domain.client_id);
             
             // Status
-            const statusCell = row.insertCell(4);
+            const statusCell = row.insertCell(5);
             const syncStatus = domain.sync_status || 'unchanged';
             let statusHtml = '';
             let statusColor = '';
@@ -835,16 +843,45 @@ DASHBOARD_TEMPLATE = """
             domainsCard.innerHTML = `
                 <h2>All Domains with URL Redirections</h2>
                 <div id="domains-summary"></div>
+                <div style="margin: 1rem 0; display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn" onclick="clearAllFilters()" style="background: #6b7280;">Clear All Filters</button>
+                </div>
                 <table class="table">
                     <thead>
                         <tr>
                             <th>
                                 <input type="checkbox" id="select-all-domains" onclick="toggleAllDomains(this)">
                             </th>
+                            <th>Number</th>
                             <th>Domain</th>
                             <th>Redirect Target</th>
                             <th>Client</th>
                             <th>Status</th>
+                        </tr>
+                        <tr style="background: #f8fafc;">
+                            <th></th>
+                            <th>
+                                <input type="text" class="form-control" id="number-filter" placeholder="Filter #..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
+                            </th>
+                            <th>
+                                <input type="text" class="form-control" id="domain-filter" placeholder="Filter domains..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
+                            </th>
+                            <th>
+                                <input type="text" class="form-control" id="redirect-filter" placeholder="Filter redirects..." onkeyup="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
+                            </th>
+                            <th>
+                                <select class="form-control" id="client-filter" onchange="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
+                                    <option value="">All Clients</option>
+                                </select>
+                            </th>
+                            <th>
+                                <select class="form-control" id="status-filter" onchange="applyFilters()" style="width: 100%; font-size: 0.875rem; padding: 0.375rem;">
+                                    <option value="">All Status</option>
+                                    <option value="synced">Synced</option>
+                                    <option value="not_synced">Not Synced</option>
+                                    <option value="unchanged">Unchanged</option>
+                                </select>
+                            </th>
                         </tr>
                     </thead>
                     <tbody id="domains-tbody"></tbody>
@@ -879,6 +916,114 @@ DASHBOARD_TEMPLATE = """
         
         function showBulkUpdateModal() {
             alert('Bulk Update functionality - Coming soon! This will allow you to update multiple domain redirections at once.');
+        }
+        
+        function applyFilters() {
+            const numberFilter = document.getElementById('number-filter').value.toLowerCase();
+            const domainFilter = document.getElementById('domain-filter').value.toLowerCase();
+            const redirectFilter = document.getElementById('redirect-filter').value.toLowerCase();
+            const clientFilter = document.getElementById('client-filter').value;
+            const statusFilter = document.getElementById('status-filter').value;
+            
+            const rows = document.querySelectorAll('#domains-tbody tr');
+            let visibleCount = 0;
+            
+            rows.forEach(row => {
+                const numberText = row.cells[1].textContent.toLowerCase();
+                const domainInput = row.cells[2].querySelector('input');
+                const domainText = domainInput ? domainInput.value.toLowerCase() : '';
+                const redirectInput = row.cells[3].querySelector('input');
+                const redirectText = redirectInput ? redirectInput.value.toLowerCase() : '';
+                const clientSelect = row.cells[4].querySelector('select');
+                const clientText = clientSelect ? clientSelect.selectedOptions[0].textContent : '';
+                const statusSpan = row.cells[5].querySelector('span');
+                const statusText = statusSpan ? statusSpan.textContent.toLowerCase() : '';
+                
+                const numberMatch = !numberFilter || numberText.includes(numberFilter);
+                const domainMatch = !domainFilter || domainText.includes(domainFilter);
+                const redirectMatch = !redirectFilter || redirectText.includes(redirectFilter);
+                const clientMatch = !clientFilter || clientText === clientFilter;
+                
+                let statusMatch = true;
+                if (statusFilter) {
+                    if (statusFilter === 'synced' && !statusText.includes('synced')) {
+                        statusMatch = false;
+                    } else if (statusFilter === 'not_synced' && !statusText.includes('not synced')) {
+                        statusMatch = false;
+                    } else if (statusFilter === 'unchanged' && !statusText.includes('unchanged')) {
+                        statusMatch = false;
+                    }
+                }
+                
+                if (numberMatch && domainMatch && redirectMatch && clientMatch && statusMatch) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            
+            // Update summary with filtered count
+            updateFilteredSummary(visibleCount, rows.length);
+        }
+        
+        function clearAllFilters() {
+            document.getElementById('number-filter').value = '';
+            document.getElementById('domain-filter').value = '';
+            document.getElementById('redirect-filter').value = '';
+            document.getElementById('client-filter').value = '';
+            document.getElementById('status-filter').value = '';
+            applyFilters();
+        }
+        
+        function updateFilteredSummary(visibleCount, totalCount) {
+            const summary = document.getElementById('domains-summary');
+            if (summary && visibleCount !== totalCount) {
+                const originalText = summary.innerHTML;
+                const filterText = `<div style="color: #3b82f6; font-weight: 600; margin-bottom: 0.5rem;">Showing ${visibleCount} of ${totalCount} domains (filtered)</div>`;
+                if (!originalText.includes('filtered')) {
+                    summary.innerHTML = filterText + originalText;
+                }
+            } else if (summary && visibleCount === totalCount) {
+                // Remove filter text if showing all
+                const lines = summary.innerHTML.split('\n');
+                const filteredLines = lines.filter(line => !line.includes('filtered'));
+                summary.innerHTML = filteredLines.join('\n');
+            }
+        }
+        
+        function populateClientFilter() {
+            const clientFilter = document.getElementById('client-filter');
+            if (!clientFilter) return;
+            
+            // Get unique client names from current data
+            const clients = new Set();
+            document.querySelectorAll('#domains-tbody tr').forEach(row => {
+                const clientSelect = row.cells[4].querySelector('select');
+                if (clientSelect && clientSelect.selectedOptions[0]) {
+                    const clientName = clientSelect.selectedOptions[0].textContent;
+                    if (clientName && clientName !== 'Unassigned') {
+                        clients.add(clientName);
+                    }
+                }
+            });
+            
+            // Preserve current selection
+            const currentValue = clientFilter.value;
+            
+            // Clear and repopulate filter options
+            clientFilter.innerHTML = '<option value="">All Clients</option>';
+            clientFilter.innerHTML += '<option value="Unassigned">Unassigned</option>';
+            
+            clients.forEach(clientName => {
+                const option = document.createElement('option');
+                option.value = clientName;
+                option.textContent = clientName;
+                clientFilter.appendChild(option);
+            });
+            
+            // Restore selection
+            clientFilter.value = currentValue;
         }
         
         let clientsData = [];
@@ -1175,28 +1320,16 @@ DASHBOARD_TEMPLATE = """
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    // Update status to synced
+                    // Update status to synced (only in UI, not database)
                     const row = input.closest('tr');
-                    const statusCell = row.cells[4]; // Status is in the 5th column (index 4)
+                    const statusCell = row.cells[5]; // Status is in the 6th column (index 5)
                     statusCell.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
-                    
-                    // Update database status
-                    await fetch('/api/update-domain-status', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            domain: domainName,
-                            status: 'synced'
-                        })
-                    });
                     
                     console.log(`Domain ${domainName} updated and status set to synced`);
                 } else {
                     // Update status to not synced
                     const row = input.closest('tr');
-                    const statusCell = row.cells[4];
+                    const statusCell = row.cells[5];
                     statusCell.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
                     
                     console.error(`Failed to update ${domainName}: ${result.message}`);
@@ -1206,7 +1339,7 @@ DASHBOARD_TEMPLATE = """
                 
                 // Update status to not synced
                 const row = input.closest('tr');
-                const statusCell = row.cells[4];
+                const statusCell = row.cells[5];
                 statusCell.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
             }
         }
