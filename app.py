@@ -78,8 +78,11 @@ DASHBOARD_TEMPLATE = """
                 <form method="POST" action="/sync-domains" style="display: inline;">
                     <button class="btn btn-success" type="submit">🔄 Sync All Domains from Namecheap</button>
                 </form>
-                <button class="btn" onclick="showBulkUpdateModal()" id="bulk-update-btn">🔧 Bulk Update</button>
-                <button class="btn" onclick="showClientModal()">👥 Manage Clients</button>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <input type="text" id="bulk-redirect-url" class="form-control" placeholder="https://redirect-url.com" style="width: 250px;">
+                    <button class="btn" onclick="performBulkUpdate()" id="bulk-update-btn">🔧 Bulk Update</button>
+                </div>
+                <a href="/clients" class="btn">👥 Manage Clients</a>
                 <form method="POST" action="/export-csv" style="display: inline;">
                     <button class="btn" type="submit">📁 Export to CSV</button>
                 </form>
@@ -94,12 +97,14 @@ DASHBOARD_TEMPLATE = """
                 </form>
             </div>
             
-            <div id="sync-progress" style="display: none; margin-bottom: 1rem;">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="sync-progress-fill" style="width: 0%;"></div>
-                </div>
-                <p id="sync-progress-text">Syncing domains from Namecheap...</p>
-                <div id="sync-status"></div>
+            <div id="sync-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                <div id="sync-text" style="font-weight: 600; margin-bottom: 0.5rem;">Status: In Progress</div>
+                <div id="sync-details">Starting sync...</div>
+            </div>
+            
+            <div id="bulk-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #10b981;">
+                <div id="bulk-text" style="font-weight: 600; margin-bottom: 0.5rem;">Bulk Update Status: In Progress</div>
+                <div id="bulk-details">Starting bulk update...</div>
             </div>
         </div>
         
@@ -488,148 +493,12 @@ DASHBOARD_TEMPLATE = """
         
         let clientsData = [];
         
-        function showClientModal() {
-            const modal = document.createElement('div');
-            modal.style.cssText = 
-                'position: fixed; top: 0; left: 0; width: 100%; height: 100%; ' +
-                'background: rgba(0,0,0,0.5); z-index: 1000; display: flex; ' +
-                'align-items: center; justify-content: center;';
-            
-            modal.innerHTML = 
-                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">' +
-                    '<h2>Manage Clients</h2>' +
-                    '<div style="margin: 1rem 0;">' +
-                        '<h3>Add New Client</h3>' +
-                        '<div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">' +
-                            '<input type="text" id="new-client-name" placeholder="Client Name" class="form-control" style="width: 200px;">' +
-                            '<input type="text" id="new-client-url" placeholder="https://client-website.com" class="form-control" style="width: 300px;">' +
-                            '<button class="btn btn-success" onclick="addNewClient()">➕ Add Client</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div style="margin: 1rem 0;">' +
-                        '<h3>Existing Clients</h3>' +
-                        '<div id="clients-list"></div>' +
-                    '</div>' +
-                    '<div style="margin-top: 2rem; text-align: right;">' +
-                        '<button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>' +
-                    '</div>' +
-                '</div>';
-            
-            modal.id = 'client-modal';
-            document.body.appendChild(modal);
-            
-            // Load existing clients
-            loadClientsForModal();
-            
-            // Close modal when clicking outside
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    closeClientModal();
-                }
-            });
-        }
         
-        async function loadClientsForModal() {
-            try {
-                const response = await fetch('/api/clients');
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    clientsData = data.clients;
-                    displayClientsInModal(data.clients);
-                }
-            } catch (error) {
-                console.error('Error loading clients:', error);
-            }
-        }
         
-        function displayClientsInModal(clients) {
-            const clientsList = document.getElementById('clients-list');
-            if (!clientsList) return;
-            
-            clientsList.innerHTML = clients.map(client => '<div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;"><div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;"><strong>' + client.name + '</strong><input type="text" value="' + (client.url || '') + '" class="form-control" style="width: 300px;" id="client-url-' + client.id + '" placeholder="https://client-website.com"><button class="btn btn-small btn-success" onclick="updateClientUrl(' + client.id + ')">Update URL</button><button class="btn btn-small" style="background: #ef4444;" onclick="deleteClient(' + client.id + ')">Delete</button></div></div>').join('');
-        }
         
-        async function addNewClient() {
-            const name = document.getElementById('new-client-name').value.trim();
-            const url = document.getElementById('new-client-url').value.trim();
-            
-            if (!name) {
-                alert('Please enter client name');
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/clients', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, url })
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    document.getElementById('new-client-name').value = '';
-                    document.getElementById('new-client-url').value = '';
-                    loadClientsForModal(); // Refresh the list
-                    alert('Client added successfully!');
-                } else {
-                    alert('Error: ' + result.message);
-                }
-            } catch (error) {
-                alert('Error adding client: ' + error.message);
-            }
-        }
         
-        async function updateClientUrl(clientId) {
-            const url = document.getElementById(`client-url-${clientId}`).value.trim();
-            
-            try {
-                const response = await fetch(`/api/clients/${clientId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url })
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    alert('Client URL updated successfully!');
-                } else {
-                    alert('Error: ' + result.message);
-                }
-            } catch (error) {
-                alert('Error updating client: ' + error.message);
-            }
-        }
         
-        async function deleteClient(clientId) {
-            if (!confirm('Are you sure you want to delete this client?')) return;
-            
-            try {
-                const response = await fetch(`/api/clients/${clientId}`, {
-                    method: 'DELETE'
-                });
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    loadClientsForModal(); // Refresh the list
-                    alert('Client deleted successfully!');
-                } else {
-                    alert('Error: ' + result.message);
-                }
-            } catch (error) {
-                alert('Error deleting client: ' + error.message);
-            }
-        }
         
-        function closeClientModal() {
-            const modal = document.getElementById('client-modal');
-            if (modal) {
-                modal.remove();
-            }
-        }
         
         async function exportRedirections() {
             try {
@@ -902,28 +771,8 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
-        // Update bulk preview URL
-        function updateBulkPreview() {
-            const select = document.querySelector('select[name="bulk_client"]');
-            const preview = document.getElementById('client-url-preview');
-            
-            if (select && preview) {
-                const selectedOption = select.selectedOptions[0];
-                if (selectedOption && selectedOption.getAttribute('data-url')) {
-                    preview.textContent = 'Target URL: ' + selectedOption.getAttribute('data-url');
-                } else {
-                    preview.textContent = '';
-                }
-            }
-        }
         
         
-        function closeClientModal() {
-            const modal = document.getElementById('client-modal');
-            if (modal) {
-                modal.remove();
-            }
-        }
         
         // Table filtering
         function filterTable() {
@@ -994,15 +843,14 @@ DASHBOARD_TEMPLATE = """
             const syncForm = document.querySelector('form[action="/sync-domains"]');
             if (syncForm) {
                 syncForm.addEventListener('submit', function(e) {
-                    const progressDiv = document.getElementById('sync-progress');
-                    const progressText = document.getElementById('sync-progress-text');
-                    const progressFill = document.getElementById('sync-progress-fill');
+                    const statusDiv = document.getElementById('sync-status');
+                    const statusText = document.getElementById('sync-text');
+                    const statusDetails = document.getElementById('sync-details');
                     
-                    if (progressDiv) {
-                        progressDiv.style.display = 'block';
-                        progressText.textContent = 'Starting sync from Namecheap...';
-                        progressFill.style.width = '10%';
-                        progressFill.style.background = '#3b82f6';
+                    if (statusDiv) {
+                        statusDiv.style.display = 'block';
+                        statusText.textContent = 'Status: In Progress';
+                        statusDetails.textContent = 'Starting sync from Namecheap...';
                     }
                     
                     // Start progress monitoring after a short delay
@@ -1167,10 +1015,108 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
-        // Show column filter
-        function showColumnFilter(columnIndex) {
-            // Simple column filter - will be enhanced
-            alert('Column filter functionality - Coming soon!');
+        // Perform bulk update
+        async function performBulkUpdate() {
+            const selectedDomains = collectSelectedDomains();
+            const bulkUrl = document.getElementById('bulk-redirect-url').value.trim();
+            
+            if (selectedDomains.length === 0) {
+                alert('Please select at least one domain for bulk update.');
+                return;
+            }
+            
+            if (!bulkUrl) {
+                alert('Please enter a redirect URL for bulk update.');
+                return;
+            }
+            
+            // Show bulk status
+            const statusDiv = document.getElementById('bulk-status');
+            const statusText = document.getElementById('bulk-text');
+            const statusDetails = document.getElementById('bulk-details');
+            
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusText.textContent = 'Bulk Update Status: In Progress';
+                statusDetails.innerHTML = `Starting bulk update for ${selectedDomains.length} domains...`;
+            }
+            
+            // Disable bulk update button
+            const bulkButton = document.getElementById('bulk-update-btn');
+            if (bulkButton) {
+                bulkButton.disabled = true;
+                bulkButton.textContent = 'Updating...';
+            }
+            
+            try {
+                let completed = 0;
+                let errors = 0;
+                
+                // Process domains one by one
+                for (let i = 0; i < selectedDomains.length; i++) {
+                    const domain = selectedDomains[i];
+                    
+                    try {
+                        const formData = new FormData();
+                        formData.append('domain', domain);
+                        formData.append('target', bulkUrl);
+                        
+                        const response = await fetch('/update-redirect', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (response.ok) {
+                            completed++;
+                        } else {
+                            errors++;
+                        }
+                        
+                        // Update progress
+                        if (statusDetails) {
+                            statusDetails.innerHTML = `Processing ${i + 1} of ${selectedDomains.length} domains<br>Completed: ${completed} | Errors: ${errors}`;
+                        }
+                        
+                        // Small delay to avoid overwhelming the API
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                    } catch (error) {
+                        errors++;
+                        console.error(`Error updating ${domain}:`, error);
+                    }
+                }
+                
+                // Final status
+                if (statusText && statusDetails) {
+                    if (errors === 0) {
+                        statusDiv.style.borderLeftColor = '#10b981';
+                        statusText.textContent = 'Bulk Update Status: Completed';
+                        statusDetails.innerHTML = `Successfully updated ${completed} of ${selectedDomains.length} domains`;
+                    } else {
+                        statusDiv.style.borderLeftColor = '#f59e0b';
+                        statusText.textContent = 'Bulk Update Status: Completed with Errors';
+                        statusDetails.innerHTML = `Updated ${completed} of ${selectedDomains.length} domains (${errors} errors)`;
+                    }
+                }
+                
+                // Reload page after delay
+                setTimeout(function() {
+                    location.reload();
+                }, 2000);
+                
+            } catch (error) {
+                if (statusText && statusDetails) {
+                    statusDiv.style.borderLeftColor = '#ef4444';
+                    statusText.textContent = 'Bulk Update Status: Failed';
+                    statusDetails.textContent = 'Bulk update failed: ' + error.message;
+                }
+            } finally {
+                // Re-enable button
+                if (bulkButton) {
+                    bulkButton.disabled = false;
+                    bulkButton.textContent = '🔧 Bulk Update';
+                }
+            }
         }
         
         // Sync progress monitoring functions
@@ -1187,50 +1133,29 @@ DASHBOARD_TEMPLATE = """
                 const response = await fetch('/api/sync-domains-progress');
                 const data = await response.json();
                 
-                const progressDiv = document.getElementById('sync-progress');
-                const progressText = document.getElementById('sync-progress-text');
-                const progressFill = document.getElementById('sync-progress-fill');
-                const syncStatus = document.getElementById('sync-status');
+                const statusDiv = document.getElementById('sync-status');
+                const statusText = document.getElementById('sync-text');
+                const statusDetails = document.getElementById('sync-details');
                 
-                if (progressDiv && progressText && progressFill) {
+                if (statusDiv && statusText && statusDetails) {
                     if (data.status === 'running') {
-                        progressDiv.style.display = 'block';
+                        statusDiv.style.display = 'block';
+                        statusDiv.style.borderLeftColor = '#3b82f6';
                         
-                        // Calculate progress percentage
-                        const percentage = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
-                        progressFill.style.width = percentage + '%';
-                        progressFill.style.background = '#3b82f6';
+                        statusText.textContent = 'Status: In Progress';
                         
-                        // Update progress text
-                        let statusText = `Syncing ${data.processed}/${data.total} domains (${percentage}%)`;
+                        let details = `Synced ${data.processed} of ${data.total} domains`;
                         if (data.current_domain) {
-                            statusText += ` - Currently: ${data.current_domain}`;
+                            details += ` (Currently: ${data.current_domain})`;
                         }
-                        progressText.textContent = statusText;
+                        details += `<br>Added: ${data.domains_added} | Updated: ${data.domains_updated} | Errors: ${data.errors.length}`;
                         
-                        // Update status with summary
-                        if (syncStatus) {
-                            syncStatus.innerHTML = `
-                                <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.5rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px;">
-                                    <strong>Progress:</strong> ${data.processed}/${data.total} domains processed<br>
-                                    <strong>Added:</strong> ${data.domains_added} | <strong>Updated:</strong> ${data.domains_updated} | <strong>Errors:</strong> ${data.errors.length}
-                                    ${data.errors.length > 0 ? '<br><strong>Recent errors:</strong> ' + data.errors.slice(-2).join(', ') : ''}
-                                </div>
-                            `;
-                        }
+                        statusDetails.innerHTML = details;
                         
                     } else if (data.status === 'completed') {
-                        progressFill.style.width = '100%';
-                        progressFill.style.background = '#10b981';
-                        progressText.textContent = `Sync completed! Added ${data.domains_added}, updated ${data.domains_updated} domains`;
-                        
-                        if (syncStatus) {
-                            syncStatus.innerHTML = `
-                                <div style="font-size: 0.875rem; color: #10b981; margin-top: 0.5rem;">
-                                    ✅ Sync completed successfully! ${data.errors.length > 0 ? data.errors.length + ' errors occurred.' : ''}
-                                </div>
-                            `;
-                        }
+                        statusDiv.style.borderLeftColor = '#10b981';
+                        statusText.textContent = 'Status: Completed';
+                        statusDetails.innerHTML = `Successfully synced ${data.processed} of ${data.total} domains<br>Added: ${data.domains_added} | Updated: ${data.domains_updated} | Errors: ${data.errors.length}`;
                         
                         // Stop monitoring and reload page after delay
                         clearInterval(syncProgressInterval);
@@ -1239,17 +1164,9 @@ DASHBOARD_TEMPLATE = """
                         }, 3000);
                         
                     } else if (data.status === 'error') {
-                        progressFill.style.width = '100%';
-                        progressFill.style.background = '#ef4444';
-                        progressText.textContent = 'Sync failed: ' + (data.error || 'Unknown error');
-                        
-                        if (syncStatus) {
-                            syncStatus.innerHTML = `
-                                <div style="font-size: 0.875rem; color: #ef4444; margin-top: 0.5rem;">
-                                    ❌ Sync failed. Please try again.
-                                </div>
-                            `;
-                        }
+                        statusDiv.style.borderLeftColor = '#ef4444';
+                        statusText.textContent = 'Status: Failed';
+                        statusDetails.textContent = 'Sync failed: ' + (data.error || 'Unknown error');
                         
                         clearInterval(syncProgressInterval);
                     }
@@ -1327,6 +1244,111 @@ DASHBOARD_TEMPLATE = """
             return false;
         }
     </script>
+</body>
+</html>
+"""
+
+# Clients management template
+CLIENTS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Manage Clients - Domain Redirect Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+        .header { background: #1e293b; color: white; padding: 1rem 2rem; }
+        .logo { font-size: 1.5rem; font-weight: 700; }
+        .container { max-width: 1000px; margin: 2rem auto; padding: 0 2rem; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 2rem; }
+        .btn { background: #3b82f6; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; margin-right: 1rem; }
+        .btn-success { background: #10b981; }
+        .btn-danger { background: #ef4444; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+        .form-control { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; width: 100%; }
+        .table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        .table th, .table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        .table th { background: #f9fafb; font-weight: 600; }
+        .client-row { border-bottom: 1px solid #e5e7eb; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">👥 Manage Clients</div>
+    </div>
+    
+    <div class="container">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h1>Client Management</h1>
+                <a href="/" class="btn">← Back to Dashboard</a>
+            </div>
+            
+            <div style="margin-bottom: 2rem; padding: 1.5rem; background: #f8fafc; border-radius: 8px;">
+                <h2 style="margin-bottom: 1rem;">Add New Client</h2>
+                <form method="POST" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+                    <input type="hidden" name="action" value="add">
+                    <div style="flex: 1; min-width: 200px;">
+                        <label>Client Name *</label>
+                        <input type="text" name="client_name" class="form-control" placeholder="Client Name" required>
+                    </div>
+                    <div style="flex: 2; min-width: 300px;">
+                        <label>Target URL</label>
+                        <input type="text" name="client_url" class="form-control" placeholder="https://client-website.com">
+                    </div>
+                    <button type="submit" class="btn btn-success">➕ Add Client</button>
+                </form>
+            </div>
+            
+            <h2 style="margin-bottom: 1rem;">Existing Clients ({{ clients|length }})</h2>
+            
+            {% if clients %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th style="width: 25%;">Client Name</th>
+                        <th style="width: 45%;">Target URL</th>
+                        <th style="width: 30%;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for client in clients %}
+                    <tr class="client-row">
+                        <td><strong>{{ client.name }}</strong></td>
+                        <td>
+                            <form method="POST" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="client_id" value="{{ client.id }}">
+                                <input type="text" name="client_url" value="{{ client.url or '' }}" class="form-control" placeholder="https://client-website.com" style="flex: 1;">
+                                <button type="submit" class="btn btn-success" style="padding: 0.5rem 1rem; margin: 0;">Update</button>
+                            </form>
+                        </td>
+                        <td>
+                            {% if client.name != 'Unassigned' %}
+                            <form method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this client?');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="client_id" value="{{ client.id }}">
+                                <button type="submit" class="btn btn-danger" style="padding: 0.5rem 1rem;">🗑 Delete</button>
+                            </form>
+                            {% else %}
+                            <span style="color: #6b7280; font-style: italic;">Default client</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="text-align: center; padding: 2rem; color: #6b7280;">
+                <p>No clients found. Add your first client above!</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
 </body>
 </html>
 """
@@ -1428,6 +1450,36 @@ def dashboard():
         domains = [d for d in domains if search_query.lower() in d['domain_name'].lower()]
     
     return render_template_string(DASHBOARD_TEMPLATE, domains=domains, clients=clients, request=request)
+
+@app.route('/clients', methods=['GET', 'POST'])
+@require_auth
+def clients_page():
+    """Clients management page"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'add':
+            client_name = request.form.get('client_name', '').strip()
+            client_url = request.form.get('client_url', '').strip() or None
+            
+            if client_name:
+                db.add_client(client_name, client_url)
+                
+        elif action == 'update':
+            client_id = request.form.get('client_id')
+            client_url = request.form.get('client_url', '').strip() or None
+            
+            if client_id:
+                db.update_client_url(int(client_id), client_url)
+                
+        elif action == 'delete':
+            client_id = request.form.get('client_id')
+            
+            if client_id:
+                db.delete_client(int(client_id))
+    
+    clients = db.get_all_clients()
+    return render_template_string(CLIENTS_TEMPLATE, clients=clients)
 
 # Global variable to track sync progress
 sync_progress = {
