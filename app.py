@@ -97,14 +97,16 @@ DASHBOARD_TEMPLATE = """
                 </form>
             </div>
             
-            <div id="sync-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;">
-                <div id="sync-text" style="font-weight: 600; margin-bottom: 0.5rem;">Status: In Progress</div>
-                <div id="sync-details">Starting sync...</div>
+            <!-- Sync status display -->
+            <div id="sync-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <div id="sync-text" style="font-weight: 600; margin-bottom: 0.5rem; color: #1e293b;">Status: In Progress</div>
+                <div id="sync-details" style="color: #6b7280;">Starting sync...</div>
             </div>
             
-            <div id="bulk-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #10b981;">
-                <div id="bulk-text" style="font-weight: 600; margin-bottom: 0.5rem;">Bulk Update Status: In Progress</div>
-                <div id="bulk-details">Starting bulk update...</div>
+            <!-- Bulk update status display -->
+            <div id="bulk-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #10b981; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <div id="bulk-text" style="font-weight: 600; margin-bottom: 0.5rem; color: #1e293b;">Bulk Update Status: In Progress</div>
+                <div id="bulk-details" style="color: #6b7280;">Starting bulk update...</div>
             </div>
         </div>
         
@@ -131,7 +133,7 @@ DASHBOARD_TEMPLATE = """
                                 <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
                                 <td>{{ domain.domain_name }}</td>
                                 <td>
-                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;" onsubmit="return handleRedirectSubmit(this, '{{ domain.domain_name }}')">
+                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;" onsubmit="event.preventDefault(); handleRedirectSubmit(this, '{{ domain.domain_name }}');">
                                         <input type="hidden" name="domain" value="{{ domain.domain_name }}">
                                         <input type="text" name="target" value="{{ redirect.target }}" class="form-control" placeholder="https://example.com" style="flex: 1;">
                                         <button type="submit" class="btn btn-small btn-success">Save</button>
@@ -157,7 +159,7 @@ DASHBOARD_TEMPLATE = """
                                 <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
                                 <td>{{ domain.domain_name }}</td>
                                 <td>
-                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;" onsubmit="return handleRedirectSubmit(this, '{{ domain.domain_name }}')">
+                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;" onsubmit="event.preventDefault(); handleRedirectSubmit(this, '{{ domain.domain_name }}');">
                                         <input type="hidden" name="domain" value="{{ domain.domain_name }}">
                                         <input type="text" name="target" value="" class="form-control" placeholder="https://example.com" style="flex: 1;">
                                         <button type="submit" class="btn btn-small btn-success">Save</button>
@@ -1196,6 +1198,7 @@ DASHBOARD_TEMPLATE = """
             const statusElement = document.getElementById('status-' + domainName.replace(/\./g, '-'));
             const submitButton = form.querySelector('button[type="submit"]');
             const targetInput = form.querySelector('input[name="target"]');
+            const newUrl = targetInput.value.trim();
             
             // Show loading status
             if (statusElement) {
@@ -1216,10 +1219,12 @@ DASHBOARD_TEMPLATE = """
                 });
                 
                 if (response.ok) {
-                    // Success - show synced status
+                    // Success - show synced status and keep the new URL
                     if (statusElement) {
                         statusElement.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
                     }
+                    // Keep the updated URL in the input field
+                    targetInput.value = newUrl;
                 } else {
                     // Error - show not synced status
                     if (statusElement) {
