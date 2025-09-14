@@ -149,7 +149,7 @@ DASHBOARD_TEMPLATE = """
                                 </td>
                                 <td>
                                     <!-- Status will be shown only after save action -->
-                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}"></span>
+                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;"></span>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -175,7 +175,7 @@ DASHBOARD_TEMPLATE = """
                                 </td>
                                 <td>
                                     <!-- Status will be shown only after save action -->
-                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}"></span>
+                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;"></span>
                                 </td>
                             </tr>
                         {% endif %}
@@ -845,14 +845,22 @@ DASHBOARD_TEMPLATE = """
             const syncForm = document.querySelector('form[action="/sync-domains"]');
             if (syncForm) {
                 syncForm.addEventListener('submit', function(e) {
+                    console.log('Sync form submitted');
                     const statusDiv = document.getElementById('sync-status');
                     const statusText = document.getElementById('sync-text');
                     const statusDetails = document.getElementById('sync-details');
                     
+                    console.log('Status elements found:', {
+                        statusDiv: !!statusDiv,
+                        statusText: !!statusText, 
+                        statusDetails: !!statusDetails
+                    });
+                    
                     if (statusDiv) {
                         statusDiv.style.display = 'block';
-                        statusText.textContent = 'Status: In Progress';
-                        statusDetails.textContent = 'Starting sync from Namecheap...';
+                        console.log('Sync status div made visible');
+                        if (statusText) statusText.textContent = 'Status: In Progress';
+                        if (statusDetails) statusDetails.textContent = 'Starting sync from Namecheap...';
                     }
                     
                     // Start progress monitoring after a short delay
@@ -1022,6 +1030,8 @@ DASHBOARD_TEMPLATE = """
             const selectedDomains = collectSelectedDomains();
             const bulkUrl = document.getElementById('bulk-redirect-url').value.trim();
             
+            console.log('Bulk update called with:', selectedDomains.length, 'domains');
+            
             if (selectedDomains.length === 0) {
                 alert('Please select at least one domain for bulk update.');
                 return;
@@ -1037,10 +1047,17 @@ DASHBOARD_TEMPLATE = """
             const statusText = document.getElementById('bulk-text');
             const statusDetails = document.getElementById('bulk-details');
             
+            console.log('Bulk status elements found:', {
+                statusDiv: !!statusDiv,
+                statusText: !!statusText,
+                statusDetails: !!statusDetails
+            });
+            
             if (statusDiv) {
                 statusDiv.style.display = 'block';
-                statusText.textContent = 'Bulk Update Status: In Progress';
-                statusDetails.innerHTML = `Starting bulk update for ${selectedDomains.length} domains...`;
+                console.log('Bulk status div made visible');
+                if (statusText) statusText.textContent = 'Bulk Update Status: In Progress';
+                if (statusDetails) statusDetails.innerHTML = `Starting bulk update for ${selectedDomains.length} domains...`;
             }
             
             // Disable bulk update button
@@ -1193,16 +1210,35 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
+        // Debug function to test status display
+        function testStatus() {
+            const allStatusElements = document.querySelectorAll('[id^="status-"]');
+            console.log('Found status elements:', allStatusElements.length);
+            
+            allStatusElements.forEach((element, index) => {
+                console.log('Element', index, ':', element.id);
+                element.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Test Status</span>';
+            });
+        }
+        
         // Handle redirect form submission with status updates
         async function handleRedirectSubmit(form, domainName) {
-            const statusElement = document.getElementById('status-' + domainName.replace(/\./g, '-'));
+            console.log('handleRedirectSubmit called for:', domainName);
+            
+            const statusId = 'status-' + domainName.replace(/\./g, '-');
+            const statusElement = document.getElementById(statusId);
             const submitButton = form.querySelector('button[type="submit"]');
             const targetInput = form.querySelector('input[name="target"]');
             const newUrl = targetInput.value.trim();
             
+            console.log('Status element ID:', statusId);
+            console.log('Status element found:', !!statusElement);
+            
             // Show loading status
             if (statusElement) {
                 statusElement.innerHTML = '<span style="color: #f59e0b; font-weight: 600;">⏳ Updating...</span>';
+            } else {
+                console.error('Status element not found with ID:', statusId);
             }
             
             // Disable button during submission
@@ -1218,10 +1254,13 @@ DASHBOARD_TEMPLATE = """
                     body: formData
                 });
                 
+                console.log('Response status:', response.status);
+                
                 if (response.ok) {
                     // Success - show synced status and keep the new URL
                     if (statusElement) {
                         statusElement.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
+                        console.log('Status updated to Synced');
                     }
                     // Keep the updated URL in the input field
                     targetInput.value = newUrl;
@@ -1229,12 +1268,14 @@ DASHBOARD_TEMPLATE = """
                     // Error - show not synced status
                     if (statusElement) {
                         statusElement.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
+                        console.log('Status updated to Not Synced');
                     }
                 }
             } catch (error) {
                 // Error - show not synced status
                 if (statusElement) {
                     statusElement.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Error</span>';
+                    console.log('Status updated to Error');
                 }
                 console.error('Error updating redirect:', error);
             } finally {
@@ -1244,9 +1285,6 @@ DASHBOARD_TEMPLATE = """
                     submitButton.textContent = 'Save';
                 }
             }
-            
-            // Prevent default form submission since we handle it with fetch
-            return false;
         }
     </script>
 </body>
