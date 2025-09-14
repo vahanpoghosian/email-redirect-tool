@@ -115,14 +115,6 @@ DASHBOARD_TEMPLATE = """
                         <th style="width: 15%;">Client</th>
                         <th style="width: 15%;">Status</th>
                     </tr>
-                    <tr style="background: #f8fafc;">
-                        <th></th>
-                        <th><div style="position: relative;"><span onclick="showColumnFilter(1)" style="cursor: pointer;">🔄</span></div></th>
-                        <th><div style="position: relative;"><span onclick="showColumnFilter(2)" style="cursor: pointer;">🔄</span></div></th>
-                        <th><div style="position: relative;"><span onclick="showColumnFilter(3)" style="cursor: pointer;">🔄</span></div></th>
-                        <th><div style="position: relative;"><span onclick="showColumnFilter(4)" style="cursor: pointer;">🔄</span></div></th>
-                        <th><div style="position: relative;"><span onclick="showColumnFilter(5)" style="cursor: pointer;">🔄</span></div></th>
-                    </tr>
                 </thead>
                 <tbody>
                     {% for domain in domains %}
@@ -133,7 +125,7 @@ DASHBOARD_TEMPLATE = """
                                 <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
                                 <td>{{ domain.domain_name }}</td>
                                 <td>
-                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;">
+                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;" onsubmit="return handleRedirectSubmit(this, '{{ domain.domain_name }}')">
                                         <input type="hidden" name="domain" value="{{ domain.domain_name }}">
                                         <input type="text" name="target" value="{{ redirect.target }}" class="form-control" placeholder="https://example.com" style="flex: 1;">
                                         <button type="submit" class="btn btn-small btn-success">Save</button>
@@ -148,13 +140,8 @@ DASHBOARD_TEMPLATE = """
                                     </select>
                                 </td>
                                 <td>
-                                    {% if domain.sync_status == 'synced' %}
-                                        <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
-                                    {% elif domain.sync_status == 'not_synced' %}
-                                        <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
-                                    {% else %}
-                                        <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
-                                    {% endif %}
+                                    <!-- Status will be shown only after save action -->
+                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}"></span>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -164,7 +151,7 @@ DASHBOARD_TEMPLATE = """
                                 <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
                                 <td>{{ domain.domain_name }}</td>
                                 <td>
-                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;">
+                                    <form method="POST" action="/update-redirect" style="display: inline-flex; align-items: center; gap: 0.5rem; width: 100%;" onsubmit="return handleRedirectSubmit(this, '{{ domain.domain_name }}')">
                                         <input type="hidden" name="domain" value="{{ domain.domain_name }}">
                                         <input type="text" name="target" value="" class="form-control" placeholder="https://example.com" style="flex: 1;">
                                         <button type="submit" class="btn btn-small btn-success">Save</button>
@@ -179,13 +166,8 @@ DASHBOARD_TEMPLATE = """
                                     </select>
                                 </td>
                                 <td>
-                                    {% if domain.sync_status == 'synced' %}
-                                        <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
-                                    {% elif domain.sync_status == 'not_synced' %}
-                                        <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
-                                    {% else %}
-                                        <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
-                                    {% endif %}
+                                    <!-- Status will be shown only after save action -->
+                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}"></span>
                                 </td>
                             </tr>
                         {% endif %}
@@ -506,29 +488,25 @@ DASHBOARD_TEMPLATE = """
                 'background: rgba(0,0,0,0.5); z-index: 1000; display: flex; ' +
                 'align-items: center; justify-content: center;';
             
-            modal.innerHTML = `
-                <div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">
-                    <h2>Manage Clients</h2>
-                    
-                    <div style="margin: 1rem 0;">
-                        <h3>Add New Client</h3>
-                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                            <input type="text" id="new-client-name" placeholder="Client Name" class="form-control" style="width: 200px;">
-                            <input type="text" id="new-client-url" placeholder="https://client-website.com" class="form-control" style="width: 300px;">
-                            <button class="btn btn-success" onclick="addNewClient()">➕ Add Client</button>
-                        </div>
-                    </div>
-                    
-                    <div style="margin: 1rem 0;">
-                        <h3>Existing Clients</h3>
-                        <div id="clients-list"></div>
-                    </div>
-                    
-                    <div style="margin-top: 2rem; text-align: right;">
-                        <button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>
-                    </div>
-                </div>
-            `;
+            modal.innerHTML = 
+                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto;">' +
+                    '<h2>Manage Clients</h2>' +
+                    '<div style="margin: 1rem 0;">' +
+                        '<h3>Add New Client</h3>' +
+                        '<div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">' +
+                            '<input type="text" id="new-client-name" placeholder="Client Name" class="form-control" style="width: 200px;">' +
+                            '<input type="text" id="new-client-url" placeholder="https://client-website.com" class="form-control" style="width: 300px;">' +
+                            '<button class="btn btn-success" onclick="addNewClient()">➕ Add Client</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div style="margin: 1rem 0;">' +
+                        '<h3>Existing Clients</h3>' +
+                        '<div id="clients-list"></div>' +
+                    '</div>' +
+                    '<div style="margin-top: 2rem; text-align: right;">' +
+                        '<button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>' +
+                    '</div>' +
+                '</div>';
             
             modal.id = 'client-modal';
             document.body.appendChild(modal);
@@ -878,53 +856,6 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
-        // Client management modal
-        function showClientModal() {
-            const modal = document.createElement('div');
-            modal.style.cssText = 
-                'position: fixed; top: 0; left: 0; width: 100%; height: 100%; ' +
-                'background: rgba(0,0,0,0.5); z-index: 1000; display: flex; ' +
-                'align-items: center; justify-content: center;';
-            
-            modal.innerHTML = 
-                '<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80%; overflow-y: auto;">' +
-                    '<h2>Manage Clients</h2>' +
-                    '<div style="margin: 1rem 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 1rem;">' +
-                        '<h3>Add New Client</h3>' +
-                        '<form method="POST" action="/add-client" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">' +
-                            '<div>' +
-                                '<label>Client Name:</label>' +
-                                '<input type="text" name="client_name" class="form-control" placeholder="Client Name" required style="width: 200px;">' +
-                            '</div>' +
-                            '<div>' +
-                                '<label>Target URL:</label>' +
-                                '<input type="text" name="client_url" class="form-control" placeholder="https://client-website.com" style="width: 300px;">' +
-                            '</div>' +
-                            '<button type="submit" class="btn btn-success">Add Client</button>' +
-                        '</form>' +
-                    '</div>' +
-                    '<div style="margin: 1rem 0;">' +
-                        '<h3>Existing Clients</h3>' +
-                        '<div id="clients-list-container">Loading clients...</div>' +
-                    '</div>' +
-                    '<div style="margin-top: 2rem; text-align: right;">' +
-                        '<button class="btn" onclick="closeClientModal()" style="background: #6b7280;">Close</button>' +
-                    '</div>' +
-                '</div>';
-            
-            modal.id = 'client-modal';
-            document.body.appendChild(modal);
-            
-            // Load existing clients
-            loadExistingClients();
-            
-            // Close modal when clicking outside
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    closeClientModal();
-                }
-            });
-        }
         
         function closeClientModal() {
             const modal = document.getElementById('client-modal');
@@ -1278,6 +1209,59 @@ DASHBOARD_TEMPLATE = """
                 // Ignore errors on initial check
                 console.log('No active sync found');
             }
+        }
+        
+        // Handle redirect form submission with status updates
+        async function handleRedirectSubmit(form, domainName) {
+            const statusElement = document.getElementById('status-' + domainName.replace(/\./g, '-'));
+            const submitButton = form.querySelector('button[type="submit"]');
+            const targetInput = form.querySelector('input[name="target"]');
+            
+            // Show loading status
+            if (statusElement) {
+                statusElement.innerHTML = '<span style="color: #f59e0b; font-weight: 600;">⏳ Updating...</span>';
+            }
+            
+            // Disable button during submission
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Saving...';
+            }
+            
+            try {
+                const formData = new FormData(form);
+                const response = await fetch('/update-redirect', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    // Success - show synced status
+                    if (statusElement) {
+                        statusElement.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
+                    }
+                } else {
+                    // Error - show not synced status
+                    if (statusElement) {
+                        statusElement.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
+                    }
+                }
+            } catch (error) {
+                // Error - show not synced status
+                if (statusElement) {
+                    statusElement.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Error</span>';
+                }
+                console.error('Error updating redirect:', error);
+            } finally {
+                // Re-enable button
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Save';
+                }
+            }
+            
+            // Prevent default form submission since we handle it with fetch
+            return false;
         }
     </script>
 </body>
