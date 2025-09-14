@@ -112,6 +112,7 @@ DASHBOARD_TEMPLATE = """
         
         <div class="card">
             <h2>All Domains with URL Redirections</h2>
+            <p style="color: #6b7280; margin-bottom: 1rem;">Found {{ domains|length }} domains {% if request.args.get('search') %}(filtered by "{{ request.args.get('search') }}"){% endif %}</p>
             
             <table class="table">
                 <thead>
@@ -125,10 +126,11 @@ DASHBOARD_TEMPLATE = """
                     </tr>
                 </thead>
                 <tbody>
-                    {% for domain in domains %}
-                        {% if domain.redirections %}
-                            {% for redirect in domain.redirections %}
-                            <tr>
+                    {% if domains %}
+                        {% for domain in domains %}
+                            {% if domain.redirections %}
+                                {% for redirect in domain.redirections %}
+                                <tr>
                                 <td><input type="checkbox" name="domain_check" value="{{ domain.domain_name }}"></td>
                                 <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
                                 <td>{{ domain.domain_name }}</td>
@@ -151,10 +153,10 @@ DASHBOARD_TEMPLATE = """
                                     <!-- Status will be shown only after save action -->
                                     <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;"></span>
                                 </td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            <tr>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
                                 <td><input type="checkbox" name="domain_check" value="{{ domain.domain_name }}"></td>
                                 <td><strong>#{{ domain.domain_number or 'N/A' }}</strong></td>
                                 <td>{{ domain.domain_name }}</td>
@@ -177,9 +179,16 @@ DASHBOARD_TEMPLATE = """
                                     <!-- Status will be shown only after save action -->
                                     <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;"></span>
                                 </td>
-                            </tr>
-                        {% endif %}
-                    {% endfor %}
+                                </tr>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" style="text-align: center; padding: 2rem; color: #6b7280;">
+                                No domains found. <a href="javascript:void(0)" onclick="location.reload()">Click here to refresh</a> or <a href="/sync-domains">sync domains from Namecheap</a>.
+                            </td>
+                        </tr>
+                    {% endif %}
                 </tbody>
             </table>
             
@@ -1488,9 +1497,14 @@ def dashboard():
     domains = db.get_all_domains_with_redirections()
     clients = db.get_all_clients()
     
+    print(f"Dashboard: Found {len(domains)} domains, {len(clients)} clients")
+    if domains:
+        print(f"First domain example: {domains[0]}")
+    
     # Filter domains if search query
     if search_query:
         domains = [d for d in domains if search_query.lower() in d['domain_name'].lower()]
+        print(f"After search filter '{search_query}': {len(domains)} domains")
     
     return render_template_string(DASHBOARD_TEMPLATE, domains=domains, clients=clients, request=request)
 
