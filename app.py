@@ -72,14 +72,7 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h2>Domain Management</h2>
-                <form method="GET" action="/" style="display: flex; gap: 1rem; align-items: center;">
-                    <input type="text" name="search" class="form-control" placeholder="Search domains..." value="{{ request.args.get('search', '') }}" style="width: 300px;">
-                    <button class="btn" type="submit">🔍 Filter</button>
-                    <a href="/" class="btn" style="background: #6b7280;">Clear</a>
-                </form>
-            </div>
+            <h2>Domain Management</h2>
             
             <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
                 <form method="POST" action="/sync-domains" style="display: inline;">
@@ -91,6 +84,14 @@ DASHBOARD_TEMPLATE = """
                     <button class="btn" type="submit">📁 Export to CSV</button>
                 </form>
                 <a href="/logout" class="btn" style="background: #ef4444;">🚪 Logout</a>
+            </div>
+            
+            <div style="margin-bottom: 1rem;">
+                <form method="GET" action="/" style="display: flex; gap: 1rem; align-items: center;">
+                    <input type="text" name="search" class="form-control" placeholder="Search domains..." value="{{ request.args.get('search', '') }}" style="width: 300px;">
+                    <button class="btn" type="submit">🔍 Search</button>
+                    <a href="/" class="btn" style="background: #6b7280;">Clear</a>
+                </form>
             </div>
             
             <div id="sync-progress" style="display: none; margin-bottom: 1rem;">
@@ -367,8 +368,14 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
-        function showBulkUpdateModal() {
-            alert('Bulk Update functionality - Coming soon! This will allow you to update multiple domain redirections at once.');
+        // Collect selected domains for bulk update
+        function collectSelectedDomains() {
+            const selected = [];
+            const checkboxes = document.querySelectorAll('input[name="domain_check"]:checked');
+            checkboxes.forEach(checkbox => {
+                selected.push(checkbox.value);
+            });
+            return selected;
         }
         
         function applyFilters() {
@@ -856,6 +863,60 @@ DASHBOARD_TEMPLATE = """
             }
         }
         
+        // Toggle bulk update inputs
+        function toggleBulkInputs() {
+            const manualRadio = document.getElementById('manual-url');
+            const manualInput = document.getElementById('manual-input');
+            const clientInput = document.getElementById('client-input');
+            
+            if (manualRadio && manualRadio.checked) {
+                if (manualInput) manualInput.style.display = 'block';
+                if (clientInput) clientInput.style.display = 'none';
+            } else {
+                if (manualInput) manualInput.style.display = 'none';
+                if (clientInput) clientInput.style.display = 'block';
+            }
+        }
+        
+        // Load clients for bulk update
+        async function loadClientsForBulk() {
+            try {
+                const response = await fetch('/api/clients');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const select = document.querySelector('select[name="bulk_client"]');
+                    if (select) {
+                        select.innerHTML = '<option value="">Choose a client...</option>';
+                        data.clients.forEach(client => {
+                            const option = document.createElement('option');
+                            option.value = client.id;
+                            option.textContent = client.name;
+                            option.setAttribute('data-url', client.url || '');
+                            select.appendChild(option);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading clients:', error);
+            }
+        }
+        
+        // Update bulk preview URL
+        function updateBulkPreview() {
+            const select = document.querySelector('select[name="bulk_client"]');
+            const preview = document.getElementById('client-url-preview');
+            
+            if (select && preview) {
+                const selectedOption = select.selectedOptions[0];
+                if (selectedOption && selectedOption.getAttribute('data-url')) {
+                    preview.textContent = 'Target URL: ' + selectedOption.getAttribute('data-url');
+                } else {
+                    preview.textContent = '';
+                }
+            }
+        }
+        
         
         function closeClientModal() {
             const modal = document.getElementById('client-modal');
@@ -1141,17 +1202,19 @@ DASHBOARD_TEMPLATE = """
                         progressFill.style.background = '#3b82f6';
                         
                         // Update progress text
-                        let statusText = `Processing ${data.processed}/${data.total} domains`;
+                        let statusText = `Syncing ${data.processed}/${data.total} domains (${percentage}%)`;
                         if (data.current_domain) {
-                            statusText += ` (${data.current_domain})`;
+                            statusText += ` - Currently: ${data.current_domain}`;
                         }
                         progressText.textContent = statusText;
                         
                         // Update status with summary
                         if (syncStatus) {
                             syncStatus.innerHTML = `
-                                <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.5rem;">
-                                    Added: ${data.domains_added} | Updated: ${data.domains_updated} | Errors: ${data.errors.length}
+                                <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.5rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px;">
+                                    <strong>Progress:</strong> ${data.processed}/${data.total} domains processed<br>
+                                    <strong>Added:</strong> ${data.domains_added} | <strong>Updated:</strong> ${data.domains_updated} | <strong>Errors:</strong> ${data.errors.length}
+                                    ${data.errors.length > 0 ? '<br><strong>Recent errors:</strong> ' + data.errors.slice(-2).join(', ') : ''}
                                 </div>
                             `;
                         }
