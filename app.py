@@ -1913,7 +1913,6 @@ def add_domain_redirection():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/sync-domains-progress', methods=['GET'])
-@require_auth
 def sync_domains_progress():
     """Get real-time progress of domain sync"""
     global sync_progress
@@ -1959,7 +1958,6 @@ def sync_single_domain():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/clients', methods=['GET'])
-@require_auth
 def get_clients():
     """Get all clients"""
     try:
