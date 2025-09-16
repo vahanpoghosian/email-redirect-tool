@@ -14,6 +14,8 @@ function App() {
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showClientManager, setShowClientManager] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+  const [bulkUpdateResults, setBulkUpdateResults] = useState({});
 
   // Load initial data
   useEffect(() => {
@@ -125,11 +127,25 @@ function App() {
       const response = await axios.post('/api/bulk-update', { updates });
 
       if (response.data.status === 'success') {
+        // Store bulk update results for status display
+        const resultsMap = {};
+        response.data.results.forEach(result => {
+          resultsMap[result.domain_name] = {
+            success: result.success,
+            verified: result.verified,
+            timestamp: Date.now()
+          };
+        });
+        setBulkUpdateResults(resultsMap);
+
+        // Clear results after 10 seconds
+        setTimeout(() => setBulkUpdateResults({}), 10000);
+
         // Refresh domains
         await loadDomainsAndClients();
         setSelectedDomains([]);
         setShowBulkModal(false);
-        return { success: true };
+        return { success: true, results: response.data.results };
       } else {
         return { success: false, error: response.data.error };
       }
@@ -164,9 +180,11 @@ function App() {
     }
   };
 
-  const filteredDomains = domains.filter(domain =>
-    domain.domain_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredDomains = domains.filter(domain => {
+    const matchesSearch = domain.domain_name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesClient = !clientFilter || domain.client_id === parseInt(clientFilter);
+    return matchesSearch && matchesClient;
+  });
 
   if (loading) {
     return (
@@ -228,7 +246,7 @@ function App() {
             </button>
           </div>
 
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
             <input
               type="text"
               className="form-control"
@@ -237,11 +255,27 @@ function App() {
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ width: '300px' }}
             />
+            <select
+              className="form-control"
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              style={{ width: '200px' }}
+            >
+              <option value="">All Clients</option>
+              {clients.map(client => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
             <button
               className="btn"
-              onClick={() => setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery('');
+                setClientFilter('');
+              }}
             >
-              Clear
+              Clear All
             </button>
           </div>
         </div>
@@ -261,7 +295,7 @@ function App() {
           <h2>All Domains with URL Redirections</h2>
           <p style={{ color: '#6b7280', marginBottom: '1rem' }}>
             Found {filteredDomains.length} domains
-            {searchQuery && ` (filtered by "${searchQuery}")`}
+            {(searchQuery || clientFilter) && ` (filtered${searchQuery ? ` by "${searchQuery}"` : ''}${clientFilter ? ` by client` : ''})`}
           </p>
 
           <DomainTable
@@ -271,6 +305,7 @@ function App() {
             onSelectionChange={setSelectedDomains}
             onSaveRedirect={handleSaveRedirect}
             onClientChange={handleClientChange}
+            bulkUpdateResults={bulkUpdateResults}
           />
         </div>
 

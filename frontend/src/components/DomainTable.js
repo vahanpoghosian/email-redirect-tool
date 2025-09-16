@@ -6,7 +6,8 @@ const DomainTable = ({
   selectedDomains,
   onSelectionChange,
   onSaveRedirect,
-  onClientChange
+  onClientChange,
+  bulkUpdateResults = {}
 }) => {
   const [savingDomains, setSavingDomains] = useState(new Set());
   const [domainStatuses, setDomainStatuses] = useState({});
@@ -112,6 +113,17 @@ const DomainTable = ({
   };
 
   const getStatusDisplay = (domainName) => {
+    // Check for bulk update results first
+    const bulkResult = bulkUpdateResults[domainName];
+    if (bulkResult) {
+      const className = bulkResult.success ? 'status-success' : 'status-error';
+      const message = bulkResult.success
+        ? (bulkResult.verified ? '✅ Bulk Updated & Verified' : '✅ Bulk Updated')
+        : '❌ Bulk Update Failed';
+      return <span className={className}>{message}</span>;
+    }
+
+    // Check for individual save status
     const status = domainStatuses[domainName];
     if (!status) return null;
 
