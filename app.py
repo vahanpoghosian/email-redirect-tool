@@ -1756,7 +1756,7 @@ def background_sync_with_rate_limiting():
                 # Get redirections with retry logic for rate limits
                 redirections_fetched = False
                 redirect_retry = 0
-                max_redirect_retries = 3
+                max_redirect_retries = 5  # Increased from 3 to 5 retries
                 
                 while redirect_retry < max_redirect_retries and not redirections_fetched:
                     try:
@@ -1785,8 +1785,9 @@ def background_sync_with_rate_limiting():
                         
                         if is_rate_limited:
                             if redirect_retry < max_redirect_retries:
-                                wait_time = min(10 * redirect_retry, 30)  # Cap at 30 seconds max wait
-                                print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {redirect_retry})")
+                                # Progressive wait times: 5s, 10s, 20s, 40s, 60s
+                                wait_time = min(5 * (2 ** (redirect_retry - 1)), 60) if redirect_retry > 0 else 5
+                                print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {redirect_retry}/{max_redirect_retries})")
                                 time.sleep(wait_time)
                                 continue
                             else:
@@ -2111,32 +2112,66 @@ def bulk_update():
                 name = update.get('name', '@')
                 target = update.get('target')
                 
-                # Update via Namecheap API
-                success = email_manager.api_client.set_domain_redirection(domain_name, name, target)
-
+                # Update via Namecheap API with retry logic
+                success = False
                 verified = False
-                if success:
-                    # Verify the redirection was actually set correctly
-                    import time
-                    time.sleep(2)  # Small delay to allow Namecheap to process
-                    verified = email_manager.api_client.verify_domain_redirection(domain_name, name, target)
+                bulk_retry = 0
+                max_bulk_retries = 5
 
-                    # Update sync status based on verification
-                    if verified:
-                        db.update_domain_sync_status(domain_name, 'synced')
+                while bulk_retry < max_bulk_retries and not success:
+                    try:
+                        success = email_manager.api_client.set_domain_redirection(domain_name, name, target)
 
-                        # Fetch and store the actual redirections from Namecheap to database
-                        try:
-                            redirections = email_manager.api_client.get_domain_redirections(domain_name)
-                            if redirections:
-                                db.update_redirections(domain_name, redirections)
-                                print(f"✅ Bulk: Updated database with {len(redirections)} redirections for {domain_name}")
-                        except Exception as e:
-                            print(f"⚠️ Bulk: Warning: Could not fetch redirections for {domain_name}: {e}")
-                    else:
-                        db.update_domain_sync_status(domain_name, 'not_synced')
-                else:
-                    db.update_domain_sync_status(domain_name, 'not_synced')
+                        if success:
+                            # Verify the redirection was actually set correctly
+                            import time
+                            time.sleep(2)  # Small delay to allow Namecheap to process
+                            verified = email_manager.api_client.verify_domain_redirection(domain_name, name, target)
+
+                            if verified:
+                                db.update_domain_sync_status(domain_name, 'synced')
+
+                                # Fetch and store the actual redirections from Namecheap to database
+                                try:
+                                    redirections = email_manager.api_client.get_domain_redirections(domain_name)
+                                    if redirections:
+                                        db.update_redirections(domain_name, redirections)
+                                        print(f"✅ Bulk: Updated database with {len(redirections)} redirections for {domain_name}")
+                                except Exception as e:
+                                    print(f"⚠️ Bulk: Warning: Could not fetch redirections for {domain_name}: {e}")
+                                break  # Success, exit retry loop
+                            else:
+                                db.update_domain_sync_status(domain_name, 'not_synced')
+                        else:
+                            # If not successful, this might be rate limiting
+                            raise Exception("Failed to set domain redirection")
+
+                    except Exception as bulk_error:
+                        bulk_retry += 1
+                        error_msg = str(bulk_error)
+
+                        # Check for rate limiting indicators
+                        is_rate_limited = (
+                            "too many requests" in error_msg.lower() or
+                            "rate limit" in error_msg.lower() or
+                            "connection/timeout error" in error_msg.lower() or
+                            "502" in error_msg or "503" in error_msg or "504" in error_msg
+                        )
+
+                        if is_rate_limited and bulk_retry < max_bulk_retries:
+                            # Progressive wait times: 5s, 10s, 20s, 40s, 60s
+                            wait_time = min(5 * (2 ** (bulk_retry - 1)), 60) if bulk_retry > 0 else 5
+                            print(f"  ⏳ Bulk: Rate limited for {domain_name}, waiting {wait_time}s (attempt {bulk_retry}/{max_bulk_retries})")
+                            time.sleep(wait_time)
+                        elif bulk_retry >= max_bulk_retries:
+                            print(f"  ❌ Bulk: Max retries reached for {domain_name}")
+                            db.update_domain_sync_status(domain_name, 'not_synced')
+                            break
+                        else:
+                            # Non-rate-limit error, don't retry
+                            print(f"  ⚠️ Bulk: Error for {domain_name}: {bulk_error}")
+                            db.update_domain_sync_status(domain_name, 'not_synced')
+                            break
 
                 results.append({
                     "domain_name": domain_name,
@@ -2672,8 +2707,43 @@ def update_redirect_form():
                 return jsonify({"error": "Domain and target are required"}), 400
             return "Domain and target are required", 400
 
-        # Update via Namecheap API
-        success = email_manager.api_client.set_domain_redirection(domain, '@', target)
+        # Update via Namecheap API with retry logic
+        success = False
+        save_retry = 0
+        max_save_retries = 5
+
+        while save_retry < max_save_retries and not success:
+            try:
+                success = email_manager.api_client.set_domain_redirection(domain, '@', target)
+                if success:
+                    break  # Success, exit retry loop
+                else:
+                    raise Exception("Failed to set domain redirection")
+
+            except Exception as save_error:
+                save_retry += 1
+                error_msg = str(save_error)
+
+                # Check for rate limiting indicators
+                is_rate_limited = (
+                    "too many requests" in error_msg.lower() or
+                    "rate limit" in error_msg.lower() or
+                    "connection/timeout error" in error_msg.lower() or
+                    "502" in error_msg or "503" in error_msg or "504" in error_msg
+                )
+
+                if is_rate_limited and save_retry < max_save_retries:
+                    # Progressive wait times: 5s, 10s, 20s, 40s, 60s
+                    wait_time = min(5 * (2 ** (save_retry - 1)), 60) if save_retry > 0 else 5
+                    print(f"  ⏳ Save: Rate limited for {domain}, waiting {wait_time}s (attempt {save_retry}/{max_save_retries})")
+                    time.sleep(wait_time)
+                elif save_retry >= max_save_retries:
+                    print(f"  ❌ Save: Max retries reached for {domain}")
+                    break
+                else:
+                    # Non-rate-limit error, don't retry
+                    print(f"  ⚠️ Save: Error for {domain}: {save_error}")
+                    break
 
         if success:
             # Verify the redirection was actually set correctly
