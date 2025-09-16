@@ -75,7 +75,7 @@ DASHBOARD_TEMPLATE = """
             <h2>Domain Management</h2>
             
             <div style="margin-bottom: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
-                <form method="POST" action="/sync-domains" style="display: inline;">
+                <form method="POST" action="/sync-domains" style="display: inline;" onsubmit="startSyncOperation(event);">
                     <button class="btn btn-success" type="submit">🔄 Sync All Domains from Namecheap</button>
                 </form>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -155,13 +155,7 @@ DASHBOARD_TEMPLATE = """
                                 <td>
                                     <!-- Status will be shown only after save action -->
                                     <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;">
-                                        {% if domain.sync_status == 'synced' %}
-                                            <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
-                                        {% elif domain.sync_status == 'not_synced' %}
-                                            <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
-                                        {% else %}
-                                            <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
-                                        {% endif %}
+                                        <!-- Empty by default, filled after Save action -->
                                     </span>
                                 </td>
                                 </tr>
@@ -189,13 +183,7 @@ DASHBOARD_TEMPLATE = """
                                 <td>
                                     <!-- Status will be shown only after save action -->
                                     <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;">
-                                        {% if domain.sync_status == 'synced' %}
-                                            <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
-                                        {% elif domain.sync_status == 'not_synced' %}
-                                            <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
-                                        {% else %}
-                                            <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
-                                        {% endif %}
+                                        <!-- Empty by default, filled after Save action -->
                                     </span>
                                 </td>
                                 </tr>
@@ -1190,7 +1178,7 @@ DASHBOARD_TEMPLATE = """
                 clearInterval(syncProgressInterval);
             }
             
-            syncProgressInterval = setInterval(updateSyncProgress, 2000); // Check every 2 seconds
+            syncProgressInterval = setInterval(updateSyncProgress, 1000); // Check every 1 second
         }
         
         async function updateSyncProgress() {
@@ -1258,7 +1246,7 @@ DASHBOARD_TEMPLATE = """
             try {
                 const response = await fetch('/api/sync-domains-progress');
                 const data = await response.json();
-                
+
                 if (data.status === 'running') {
                     startSyncProgressMonitoring();
                 }
@@ -1267,16 +1255,71 @@ DASHBOARD_TEMPLATE = """
                 console.log('No active sync found');
             }
         }
+
+        // Handle sync form submission to show progress immediately
+        function startSyncOperation(event) {
+            console.log('Starting sync operation...');
+
+            // Show the sync status div immediately
+            const statusDiv = document.getElementById('sync-status');
+            const statusText = document.getElementById('sync-text');
+            const statusDetails = document.getElementById('sync-details');
+            const progressFill = document.getElementById('sync-progress-fill');
+
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.borderLeftColor = '#3b82f6';
+
+                if (statusText) {
+                    statusText.textContent = 'Status: Initializing...';
+                }
+
+                if (statusDetails) {
+                    statusDetails.innerHTML = 'Starting domain sync from Namecheap...';
+                }
+
+                if (progressFill) {
+                    progressFill.style.width = '0%';
+                }
+            }
+
+            // Start monitoring immediately (will begin polling in 1 second)
+            startSyncProgressMonitoring();
+
+            // Let the form submit normally
+            return true;
+        }
         
         // Debug function to test status display
         function testStatus() {
             const allStatusElements = document.querySelectorAll('[id^="status-"]');
             console.log('Found status elements:', allStatusElements.length);
-            
+
             allStatusElements.forEach((element, index) => {
                 console.log('Element', index, ':', element.id);
                 element.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Test Status</span>';
             });
+        }
+
+        // Debug function to test save functionality
+        function testSave() {
+            const forms = document.querySelectorAll('form[onsubmit*="handleRedirectSubmit"]');
+            console.log('Found forms with handleRedirectSubmit:', forms.length);
+
+            if (forms.length > 0) {
+                const firstForm = forms[0];
+                const domainName = firstForm.querySelector('input[name="domain"]').value;
+                const targetInput = firstForm.querySelector('input[name="target"]');
+
+                console.log('Testing with domain:', domainName);
+                console.log('Current target:', targetInput.value);
+
+                // Test with a dummy URL
+                targetInput.value = 'https://test-redirect.com';
+                handleRedirectSubmit(firstForm, domainName);
+            } else {
+                console.log('No forms found for testing');
+            }
         }
         
         // Handle redirect form submission with status updates
@@ -1346,6 +1389,7 @@ DASHBOARD_TEMPLATE = """
                     console.log('Status updated to Error');
                 }
                 console.error('Error updating redirect:', error);
+                alert('Error updating redirect: ' + error.message);
             } finally {
                 // Re-enable button
                 if (submitButton) {
