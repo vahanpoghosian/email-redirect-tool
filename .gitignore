@@ -60,3 +60,14 @@ email_redirect_results_*.csv
 # Temporary files
 temp/
 tmp/
+
+# Node.js
+frontend/node_modules/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.npm/
+frontend/.cache/
+
+# Keep React build output
+!frontend/build/

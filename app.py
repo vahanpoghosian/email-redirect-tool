@@ -3,7 +3,7 @@ Email Redirection Tool - Flask Application
 View existing email forwarding for Namecheap domains
 """
 
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_from_directory
 from flask_cors import CORS
 import json
 import os
@@ -1594,32 +1594,35 @@ def logout():
 
 @app.route('/', methods=['GET'])
 def index():
-    """Serve React app or setup instructions"""
+    """Serve React app"""
     try:
-        # Try to serve the built React app
+        # Serve the built React app
         with open('frontend/build/index.html', 'r') as f:
             return f.read()
     except FileNotFoundError:
-        # If React app not built, show development message
+        # If React app not built, show instructions
         return """
         <html>
         <head><title>Domain Redirect Tool</title></head>
         <body style="font-family: Arial, sans-serif; padding: 2rem; text-align: center;">
             <h1>🔗 Domain Redirect Tool</h1>
-            <h2>React Frontend Setup</h2>
-            <p>To run the React frontend:</p>
+            <h2>React Frontend Not Built</h2>
+            <p>The React frontend needs to be built first:</p>
             <ol style="text-align: left; max-width: 600px; margin: 0 auto;">
-                <li>Open terminal in project directory</li>
                 <li>Run: <code>cd frontend</code></li>
                 <li>Run: <code>npm install</code></li>
-                <li>Run: <code>npm start</code></li>
-                <li>Open: <a href="http://localhost:3000">http://localhost:3000</a></li>
+                <li>Run: <code>npm run build</code></li>
+                <li>Reload this page</li>
             </ol>
-            <p><strong>API is running at:</strong> <a href="/api/domains">/api/domains</a></p>
             <p><strong>Legacy Dashboard:</strong> <a href="/dashboard">/dashboard</a></p>
         </body>
         </html>
         """
+
+@app.route('/static/<path:path>')
+def serve_static(path):
+    """Serve React static files"""
+    return send_from_directory('frontend/build/static', path)
 
 @app.route('/dashboard', methods=['GET', 'POST'])
 @require_auth
