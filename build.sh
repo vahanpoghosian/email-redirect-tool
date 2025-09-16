@@ -1,20 +1,27 @@
 #!/bin/bash
 
 # Build script for Render.com deployment
-echo "🔨 Building React frontend..."
+echo "🔨 Checking React frontend..."
 
-# Navigate to frontend directory
-cd frontend
+# Check if React build already exists
+if [ -d "frontend/build" ] && [ -f "frontend/build/index.html" ]; then
+    echo "✅ React build files already exist, skipping npm build"
+else
+    echo "📦 React build not found, building..."
 
-# Install dependencies
-echo "📦 Installing dependencies..."
-npm ci --only=production
+    # Navigate to frontend directory
+    cd frontend
 
-# Build React app
-echo "⚛️ Building React app..."
-npm run build
+    # Install dependencies
+    echo "📦 Installing dependencies..."
+    npm ci --only=production
 
-# Return to main directory
-cd ..
+    # Build React app
+    echo "⚛️ Building React app..."
+    npm run build
 
-echo "✅ Build complete! React app built and ready to deploy."
+    # Return to main directory
+    cd ..
+fi
+
+echo "✅ Build setup complete! Flask app ready to serve React files."
