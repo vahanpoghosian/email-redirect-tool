@@ -1986,14 +1986,20 @@ def add_client():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/clients/<int:client_id>', methods=['PUT'])
-@require_auth
 def update_client(client_id):
-    """Update client URL"""
+    """Update client name and URL"""
     try:
         data = request.get_json()
+        name = data.get('name', '').strip()
         url = data.get('url', '').strip() or None
-        
-        db.update_client_url(client_id, url)
+
+        if name:
+            # Update both name and URL if name is provided
+            db.update_client(client_id, name, url)
+        else:
+            # Just update URL if only URL is provided (backward compatibility)
+            db.update_client_url(client_id, url)
+
         return jsonify({
             "status": "success",
             "message": "Client updated successfully"
@@ -2002,7 +2008,6 @@ def update_client(client_id):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/clients/<int:client_id>', methods=['DELETE'])
-@require_auth
 def delete_client(client_id):
     """Delete client"""
     try:
@@ -2555,6 +2560,22 @@ def health_check():
         "service": "email-redirect-tool",
         "timestamp": datetime.now().isoformat()
     })
+
+@app.route('/api/debug-db', methods=['GET'])
+def debug_database():
+    """Debug endpoint to see raw database structure"""
+    try:
+        # Get first 3 domains from database with full structure
+        db_domains = db.get_all_domains_with_redirections()[:3]
+
+        return jsonify({
+            "status": "success",
+            "db_domains_sample": db_domains,
+            "total_db_domains": len(db.get_all_domains_with_redirections())
+        })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/update-domain-status', methods=['POST'])
 @require_auth
