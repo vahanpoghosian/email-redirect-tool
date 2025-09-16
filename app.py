@@ -12,7 +12,7 @@ from functools import wraps
 from namecheap_client import EmailRedirectionManager
 from models import Database
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend/build/static', static_url_path='/static')
 app.secret_key = os.environ.get('SECRET_KEY', 'change-in-production-email-redirect-tool')
 CORS(app)
 
@@ -1618,10 +1618,6 @@ def index():
         </html>
         """
 
-@app.route('/static/<path:path>')
-def serve_static(path):
-    """Serve React static files"""
-    return send_from_directory('frontend/build/static', path)
 
 @app.route('/dashboard', methods=['GET', 'POST'])
 @require_auth
