@@ -1784,7 +1784,7 @@ def background_sync_with_rate_limiting():
                         
                         if is_rate_limited:
                             if redirect_retry < max_redirect_retries:
-                                wait_time = min(15 * redirect_retry, 60)  # Cap at 60 seconds max wait
+                                wait_time = min(5 * redirect_retry, 15)  # Cap at 15 seconds max wait
                                 print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {redirect_retry})")
                                 time.sleep(wait_time)
                                 continue
@@ -1798,18 +1798,14 @@ def background_sync_with_rate_limiting():
                             sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
                             break
                 
-                # Progressive delay based on errors and position
-                base_delay = 2
-                if len(sync_progress["errors"]) > 5:  # Many errors, slow down more
-                    base_delay = 8
-                elif len(sync_progress["errors"]) > 2:
-                    base_delay = 5
-                
-                if i > 50:  # After 50 domains, longer delays
-                    base_delay += 3
-                elif i > 20:  # After 20 domains, medium delays
-                    base_delay += 1
-                
+                # Much faster delays - only slow down if many errors
+                base_delay = 0.3  # Start with 300ms delay
+                if len(sync_progress["errors"]) > 10:  # Many errors, slow down more
+                    base_delay = 2
+                elif len(sync_progress["errors"]) > 5:
+                    base_delay = 1
+
+                # No progressive delays based on position - keep it fast
                 time.sleep(base_delay)
                     
             except Exception as e:
@@ -2460,10 +2456,18 @@ def get_domains():
         for i, domain_name in enumerate(domain_names, 1):
             db_domain = db_lookup.get(domain_name, {})
 
+            # Get the primary redirect URL from the redirections array
+            redirect_url = ''
+            redirections = db_domain.get('redirections', [])
+            for redirect in redirections:
+                if redirect.get('name') == '@' and redirect.get('type') == 'URL':
+                    redirect_url = redirect.get('target', '')
+                    break
+
             domain_obj = {
                 "domain_name": domain_name,
                 "domain_number": i,
-                "redirect_url": db_domain.get('redirect_url', ''),
+                "redirect_url": redirect_url,
                 "status": db_domain.get('sync_status', 'ready'),
                 "client_id": db_domain.get('client_id'),
                 "client_name": client_lookup.get(db_domain.get('client_id'), {}).get('name', 'Unassigned') if db_domain.get('client_id') else 'Unassigned',
