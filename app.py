@@ -1843,7 +1843,6 @@ def background_sync_with_rate_limiting():
         sync_progress["error"] = str(e)
 
 @app.route('/api/sync-all-domains', methods=['POST'])
-@require_auth
 def sync_all_domains():
     """Start sync all domains from Namecheap to database"""
     global sync_progress
@@ -2067,35 +2066,6 @@ def get_domains_from_db():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/clients', methods=['GET', 'POST'])
-@require_auth
-def manage_clients():
-    """Get all clients or add new client"""
-    if request.method == 'GET':
-        try:
-            clients = db.get_all_clients()
-            return jsonify({"status": "success", "clients": clients})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-    
-    elif request.method == 'POST':
-        try:
-            data = request.get_json()
-            client_name = data.get('client_name', '').strip()
-            
-            if not client_name:
-                return jsonify({"error": "Client name required"}), 400
-            
-            client_id = db.add_client(client_name)
-            
-            return jsonify({
-                "status": "success",
-                "client_id": client_id,
-                "client_name": client_name
-            })
-            
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
 
 @app.route('/api/assign-client', methods=['POST'])
 def assign_client():
