@@ -39,9 +39,7 @@ const DomainTable = ({
     if (redirectValues[domain.domain_name] !== undefined) {
       return redirectValues[domain.domain_name];
     }
-    return domain.redirections && domain.redirections.length > 0
-      ? domain.redirections[0].target
-      : '';
+    return domain.redirect_url || '';
   };
 
   const handleSave = async (domain) => {
