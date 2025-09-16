@@ -2475,8 +2475,18 @@ def get_domains():
                 "message": "Email manager not initialized. Check API credentials."
             }), 503
         
-        domains = email_manager.get_all_domains()
-        
+        domain_names = email_manager.get_all_domains()
+
+        # Transform domain names into objects that React expects
+        domains = []
+        for i, domain_name in enumerate(domain_names, 1):
+            domains.append({
+                "domain_name": domain_name,
+                "domain_number": i,
+                "redirect_url": "",  # Will be populated when needed
+                "status": "ready"
+            })
+
         return jsonify({
             "status": "success",
             "domains": domains,
