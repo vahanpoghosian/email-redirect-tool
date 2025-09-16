@@ -1966,7 +1966,6 @@ def get_clients():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/clients', methods=['POST'])
-@require_auth
 def add_client():
     """Add new client"""
     try:
@@ -2099,7 +2098,6 @@ def manage_clients():
             return jsonify({"error": str(e)}), 500
 
 @app.route('/api/assign-client', methods=['POST'])
-@require_auth
 def assign_client():
     """Assign domain to client"""
     try:
@@ -2118,7 +2116,6 @@ def assign_client():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/bulk-update', methods=['POST'])
-@require_auth
 def bulk_update():
     """Bulk update domains with progress tracking"""
     try:
@@ -2475,17 +2472,34 @@ def get_domains():
                 "message": "Email manager not initialized. Check API credentials."
             }), 503
         
+        # Get domains from Namecheap
         domain_names = email_manager.get_all_domains()
+
+        # Get domains with redirections from database
+        db_domains = db.get_all_domains_with_redirections()
+
+        # Create a lookup for database domains
+        db_lookup = {d['domain_name']: d for d in db_domains}
+
+        # Get all clients for reference
+        clients = db.get_all_clients()
+        client_lookup = {c['id']: c for c in clients}
 
         # Transform domain names into objects that React expects
         domains = []
         for i, domain_name in enumerate(domain_names, 1):
-            domains.append({
+            db_domain = db_lookup.get(domain_name, {})
+
+            domain_obj = {
                 "domain_name": domain_name,
                 "domain_number": i,
-                "redirect_url": "",  # Will be populated when needed
-                "status": "ready"
-            })
+                "redirect_url": db_domain.get('redirect_url', ''),
+                "status": db_domain.get('sync_status', 'ready'),
+                "client_id": db_domain.get('client_id'),
+                "client_name": client_lookup.get(db_domain.get('client_id'), {}).get('name', 'Unassigned') if db_domain.get('client_id') else 'Unassigned',
+                "updated_at": db_domain.get('updated_at')
+            }
+            domains.append(domain_obj)
 
         return jsonify({
             "status": "success",
