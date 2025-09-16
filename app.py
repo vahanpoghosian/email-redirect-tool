@@ -2457,6 +2457,15 @@ def get_domains():
         # Create a lookup for database domains
         db_lookup = {d['domain_name']: d for d in db_domains}
 
+        # Debug logging
+        print(f"DEBUG: Namecheap returned {len(domain_names)} domains")
+        print(f"DEBUG: Database has {len(db_domains)} domains")
+        if db_domains:
+            print(f"DEBUG: First DB domain: {db_domains[0]['domain_name']}")
+        if domain_names:
+            print(f"DEBUG: First Namecheap domain: {domain_names[0]}")
+        print(f"DEBUG: db_lookup keys count: {len(db_lookup)}")
+
         # Get all clients for reference
         clients = db.get_all_clients()
         client_lookup = {c['id']: c for c in clients}
