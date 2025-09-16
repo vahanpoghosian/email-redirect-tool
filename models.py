@@ -207,21 +207,37 @@ class Database:
                     SELECT redirect_name, redirect_target, redirect_type
                     FROM redirections WHERE domain_id = ?
                 ''', (domain_id,))
-                
+
                 redirections = []
+                auto_detected_client_id = client_id
+                auto_detected_client_name = client_name
+
                 for redirect_row in cursor.fetchall():
                     redirections.append({
                         'name': redirect_row[0],
                         'target': redirect_row[1],
                         'type': redirect_row[2]
                     })
-                
+
+                    # Auto-detect client from redirect URL if not already assigned
+                    if not client_id or client_name == 'Unassigned':
+                        redirect_target = redirect_row[1]
+                        if redirect_target:
+                            matched_client = self.find_client_by_url(redirect_target)
+                            if matched_client:
+                                auto_detected_client_id = matched_client['id']
+                                auto_detected_client_name = matched_client['name']
+                                # Update domain with detected client
+                                cursor.execute('''
+                                    UPDATE domains SET client_id = ? WHERE id = ?
+                                ''', (matched_client['id'], domain_id))
+
                 domains.append({
                     'id': domain_id,
                     'domain_number': domain_number,
                     'domain_name': domain_name,
-                    'client_name': client_name or 'Unassigned',
-                    'client_id': client_id,
+                    'client_name': auto_detected_client_name or 'Unassigned',
+                    'client_id': auto_detected_client_id,
                     'redirections': redirections,
                     'updated_at': updated_at,
                     'sync_status': sync_status or 'unchanged'
@@ -234,8 +250,26 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id, client_name, client_url FROM clients ORDER BY client_name')
-            
+
             return [{'id': row[0], 'name': row[1], 'url': row[2]} for row in cursor.fetchall()]
+
+    def find_client_by_url(self, url: str) -> Optional[Dict]:
+        """Find client by URL"""
+        if not url or not url.strip():
+            return None
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, client_name, client_url FROM clients WHERE client_url = ?', (url.strip(),))
+            result = cursor.fetchone()
+
+            if result:
+                return {
+                    'id': result[0],
+                    'name': result[1],
+                    'url': result[2]
+                }
+            return None
     
     def add_client(self, client_name: str, client_url: str = None) -> int:
         """Add new client"""

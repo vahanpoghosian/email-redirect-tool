@@ -591,6 +591,23 @@ class NamecheapAPIClient:
         except Exception as e:
             print(f"❌ Error setting domain redirection for {domain}: {e}")
             return False
+
+    def verify_domain_redirection(self, domain: str, name: str, expected_target: str) -> bool:
+        """Verify that domain redirection was actually set correctly"""
+        try:
+            redirections = self.get_domain_redirections(domain)
+
+            for redirect in redirections:
+                if redirect.get('name') == name and redirect.get('target') == expected_target:
+                    print(f"✅ Verified redirection for {domain}: {name} -> {expected_target}")
+                    return True
+
+            print(f"❌ Verification failed for {domain}: {name} -> {expected_target}")
+            return False
+
+        except Exception as e:
+            print(f"❌ Error verifying domain redirection: {str(e)}")
+            return False
     
     def _get_all_hosts(self, domain: str) -> List[Dict]:
         """Get all DNS host records for a domain"""

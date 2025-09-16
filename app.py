@@ -1020,31 +1020,49 @@ DASHBOARD_TEMPLATE = """
         
         // Update domain client assignment
         async function updateDomainClient(domainName, clientId) {
-            if (!clientId) return; // Don't update if no client selected
-            
             try {
-                const response = await fetch('/api/assign-client', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ domain_name: domainName, client_id: clientId })
-                });
-                
-                const result = await response.json();
-                if (result.status === 'success') {
-                    // Find the client URL and populate redirect field
-                    const clients = await fetch('/api/clients').then(r => r.json());
-                    if (clients.status === 'success') {
-                        const client = clients.clients.find(c => c.id == clientId);
-                        if (client && client.url) {
-                            // Find the redirect input in the same row
-                            const select = document.querySelector('select[onchange*="' + domainName + '"]');
-                            if (select) {
-                                const row = select.closest('tr');
-                                const redirectInput = row.querySelector('input[name="target"]');
-                                if (redirectInput) {
-                                    redirectInput.value = client.url;
-                                }
-                            }
+                // Get client data first to get the URL
+                const clientsResponse = await fetch('/api/clients');
+                const clientsData = await clientsResponse.json();
+                let clientUrl = '';
+
+                if (clientsData.status === 'success' && clientId) {
+                    const client = clientsData.clients.find(c => c.id == clientId);
+                    if (client && client.url) {
+                        clientUrl = client.url;
+                    }
+                }
+
+                // Update client assignment in database
+                if (clientId) {
+                    const response = await fetch('/api/assign-client', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ domain_name: domainName, client_id: clientId })
+                    });
+
+                    const result = await response.json();
+                    if (result.status !== 'success') {
+                        console.error('Failed to assign client:', result.error);
+                        return;
+                    }
+                }
+
+                // Auto-fill redirect URL field with client URL
+                const domainSafeId = domainName.replace(/\./g, '-');
+                const selectElement = document.querySelector(`select[onchange*="${domainName}"]`);
+
+                if (selectElement) {
+                    const row = selectElement.closest('tr');
+                    const redirectInput = row.querySelector('input[name="target"]');
+
+                    if (redirectInput) {
+                        if (clientUrl) {
+                            redirectInput.value = clientUrl;
+                            console.log(`Auto-filled redirect URL for ${domainName}: ${clientUrl}`);
+                        } else if (!clientId) {
+                            // If "Unassigned" is selected, don't clear the URL - let user decide
+                            console.log(`Client unassigned for ${domainName}, keeping existing redirect URL`);
                         }
                     }
                 }
@@ -2052,10 +2070,26 @@ def bulk_update():
                 
                 # Update via Namecheap API
                 success = email_manager.api_client.set_domain_redirection(domain_name, name, target)
-                
+
+                verified = False
+                if success:
+                    # Verify the redirection was actually set correctly
+                    import time
+                    time.sleep(2)  # Small delay to allow Namecheap to process
+                    verified = email_manager.api_client.verify_domain_redirection(domain_name, name, target)
+
+                    # Update sync status based on verification
+                    if verified:
+                        db.update_domain_sync_status(domain_name, 'synced')
+                    else:
+                        db.update_domain_sync_status(domain_name, 'not_synced')
+                else:
+                    db.update_domain_sync_status(domain_name, 'not_synced')
+
                 results.append({
                     "domain_name": domain_name,
                     "success": success,
+                    "verified": verified,
                     "processed": i + 1,
                     "total": len(updates)
                 })
@@ -2531,19 +2565,34 @@ def update_redirect_form():
         success = email_manager.api_client.set_domain_redirection(domain, '@', target)
 
         if success:
-            # Update sync status
-            db.update_domain_sync_status(domain, 'synced')
+            # Verify the redirection was actually set correctly
+            import time
+            time.sleep(2)  # Small delay to allow Namecheap to process
+            verified = email_manager.api_client.verify_domain_redirection(domain, '@', target)
 
-            # Return JSON for AJAX requests
-            if request.is_json or request.headers.get('Content-Type') == 'application/json':
-                return jsonify({
-                    "status": "success",
-                    "message": f"Successfully updated redirection for {domain}",
-                    "domain": domain,
-                    "target": target
-                })
+            if verified:
+                # Update sync status
+                db.update_domain_sync_status(domain, 'synced')
+
+                # Return JSON for AJAX requests
+                if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                    return jsonify({
+                        "status": "success",
+                        "message": f"Successfully updated and verified redirection for {domain}",
+                        "domain": domain,
+                        "target": target,
+                        "verified": True
+                    })
+                else:
+                    return redirect(url_for('dashboard'))
             else:
-                return redirect(url_for('dashboard'))
+                # Set operation claimed success but verification failed
+                db.update_domain_sync_status(domain, 'not_synced')
+
+                if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                    return jsonify({"error": f"Redirection was set but verification failed for {domain}"}), 500
+                else:
+                    return f"Redirection was set but verification failed for {domain}", 500
         else:
             db.update_domain_sync_status(domain, 'not_synced')
 
@@ -2598,11 +2647,23 @@ def bulk_update_form():
         for domain in selected_domains:
             try:
                 success = email_manager.api_client.set_domain_redirection(domain, '@', bulk_target)
+
+                verified = False
                 if success:
-                    db.update_domain_sync_status(domain, 'synced')
+                    # Verify the redirection was actually set correctly
+                    import time
+                    time.sleep(2)  # Small delay to allow Namecheap to process
+                    verified = email_manager.api_client.verify_domain_redirection(domain, '@', bulk_target)
+
+                    # Update sync status based on verification
+                    if verified:
+                        db.update_domain_sync_status(domain, 'synced')
+                    else:
+                        db.update_domain_sync_status(domain, 'not_synced')
                 else:
                     db.update_domain_sync_status(domain, 'not_synced')
-                results.append({'domain': domain, 'success': success})
+
+                results.append({'domain': domain, 'success': success, 'verified': verified})
                 # Add delay between updates
                 import time
                 time.sleep(0.6)
