@@ -1592,23 +1592,52 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/', methods=['GET'])
+def index():
+    """Serve React app or setup instructions"""
+    try:
+        # Try to serve the built React app
+        with open('frontend/build/index.html', 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        # If React app not built, show development message
+        return """
+        <html>
+        <head><title>Domain Redirect Tool</title></head>
+        <body style="font-family: Arial, sans-serif; padding: 2rem; text-align: center;">
+            <h1>🔗 Domain Redirect Tool</h1>
+            <h2>React Frontend Setup</h2>
+            <p>To run the React frontend:</p>
+            <ol style="text-align: left; max-width: 600px; margin: 0 auto;">
+                <li>Open terminal in project directory</li>
+                <li>Run: <code>cd frontend</code></li>
+                <li>Run: <code>npm install</code></li>
+                <li>Run: <code>npm start</code></li>
+                <li>Open: <a href="http://localhost:3000">http://localhost:3000</a></li>
+            </ol>
+            <p><strong>API is running at:</strong> <a href="/api/domains">/api/domains</a></p>
+            <p><strong>Legacy Dashboard:</strong> <a href="/dashboard">/dashboard</a></p>
+        </body>
+        </html>
+        """
+
+@app.route('/dashboard', methods=['GET', 'POST'])
 @require_auth
 def dashboard():
-    """Main dashboard"""
+    """Legacy dashboard for backward compatibility"""
     search_query = request.args.get('search', '')
     domains = db.get_all_domains_with_redirections()
     clients = db.get_all_clients()
-    
+
     print(f"Dashboard: Found {len(domains)} domains, {len(clients)} clients")
     if domains:
         print(f"First domain example: {domains[0]}")
-    
+
     # Filter domains if search query
     if search_query:
         domains = [d for d in domains if search_query.lower() in d['domain_name'].lower()]
         print(f"After search filter '{search_query}': {len(domains)} domains")
-    
+
     return render_template_string(DASHBOARD_TEMPLATE, domains=domains, clients=clients, request=request)
 
 @app.route('/clients', methods=['GET', 'POST'])
