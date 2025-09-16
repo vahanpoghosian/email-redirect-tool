@@ -1784,7 +1784,7 @@ def background_sync_with_rate_limiting():
                         
                         if is_rate_limited:
                             if redirect_retry < max_redirect_retries:
-                                wait_time = min(5 * redirect_retry, 15)  # Cap at 15 seconds max wait
+                                wait_time = min(10 * redirect_retry, 30)  # Cap at 30 seconds max wait
                                 print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {redirect_retry})")
                                 time.sleep(wait_time)
                                 continue
@@ -1798,14 +1798,19 @@ def background_sync_with_rate_limiting():
                             sync_progress["errors"].append(f"{domain_name}: {str(redirect_error)}")
                             break
                 
-                # Much faster delays - only slow down if many errors
-                base_delay = 0.3  # Start with 300ms delay
-                if len(sync_progress["errors"]) > 10:  # Many errors, slow down more
-                    base_delay = 2
-                elif len(sync_progress["errors"]) > 5:
-                    base_delay = 1
+                # Balanced delays to avoid rate limiting
+                base_delay = 1.5  # Start with 1.5 second delay
+                if len(sync_progress["errors"]) > 5:  # If we're getting errors, slow down
+                    base_delay = 4
+                elif len(sync_progress["errors"]) > 2:
+                    base_delay = 3
 
-                # No progressive delays based on position - keep it fast
+                # Add slight progressive delay for large batches
+                if i > 100:  # After 100 domains, longer delays
+                    base_delay += 1
+                elif i > 50:  # After 50 domains, medium delays
+                    base_delay += 0.5
+
                 time.sleep(base_delay)
                     
             except Exception as e:
