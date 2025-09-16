@@ -1580,7 +1580,7 @@ def login():
         if db.verify_user(username, password):
             session['authenticated'] = True
             session['username'] = username
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('index'))
         else:
             return render_template_string(LOGIN_TEMPLATE, error="Invalid credentials")
     
