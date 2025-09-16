@@ -1596,9 +1596,8 @@ def logout():
 def index():
     """Serve React app"""
     try:
-        # Serve the built React app
-        with open('frontend/build/index.html', 'r') as f:
-            return f.read()
+        # Serve the built React app with proper content type
+        return send_from_directory('frontend/build', 'index.html')
     except FileNotFoundError:
         # If React app not built, show instructions
         return """
@@ -2807,8 +2806,22 @@ def add_client_form():
     except Exception as e:
         return f"Error adding client: {str(e)}", 500
 
+# Catch-all route for React Router (must be last)
+@app.route('/<path:path>')
+def catch_all(path):
+    """Serve React app for any unmatched routes (client-side routing)"""
+    # Don't interfere with API routes
+    if path.startswith('api/'):
+        return {"error": "API endpoint not found"}, 404
+
+    # For any other route, serve the React app
+    try:
+        return send_from_directory('frontend/build', 'index.html')
+    except FileNotFoundError:
+        return "React app not built", 404
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV', 'production') == 'development'
-    
+
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
