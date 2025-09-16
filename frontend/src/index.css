@@ -180,6 +180,10 @@ body {
   border-left-color: #ef4444;
 }
 
+.sync-status.stopped {
+  border-left-color: #f59e0b;
+}
+
 /* Utilities */
 .flex {
   display: flex;

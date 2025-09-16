@@ -20,7 +20,7 @@ const SyncProgress = ({ onComplete }) => {
 
         setProgress(data);
 
-        if (data.status === 'completed' || data.status === 'error') {
+        if (data.status === 'completed' || data.status === 'error' || data.status === 'stopped') {
           clearInterval(interval);
           setTimeout(() => {
             onComplete();
@@ -47,6 +47,8 @@ const SyncProgress = ({ onComplete }) => {
         return 'sync-status completed';
       case 'error':
         return 'sync-status error';
+      case 'stopped':
+        return 'sync-status stopped';
       default:
         return 'sync-status';
     }
@@ -60,6 +62,8 @@ const SyncProgress = ({ onComplete }) => {
         return 'Status: Completed';
       case 'error':
         return 'Status: Failed';
+      case 'stopped':
+        return 'Status: Stopped by User';
       default:
         return 'Status: Initializing...';
     }

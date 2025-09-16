@@ -1677,7 +1677,8 @@ sync_progress = {
     "current_domain": "",
     "domains_added": 0,
     "domains_updated": 0,
-    "errors": []
+    "errors": [],
+    "should_stop": False
 }
 
 import threading
@@ -1731,9 +1732,16 @@ def background_sync_with_rate_limiting():
         
         # Process domains with aggressive rate limiting
         for i, domain_name in enumerate(namecheap_domains, 1):
+            # Check if sync should stop
+            if sync_progress["should_stop"]:
+                sync_progress["status"] = "stopped"
+                sync_progress["current_domain"] = ""
+                print(f"⏹ Sync stopped by user at domain {i}/{sync_progress['total']}")
+                return
+
             sync_progress["processed"] = i
             sync_progress["current_domain"] = domain_name
-            
+
             try:
                 print(f"Processing {i}/{sync_progress['total']}: {domain_name}")
                 
@@ -1914,7 +1922,7 @@ def add_domain_redirection():
 def sync_domains_progress():
     """Get real-time progress of domain sync"""
     global sync_progress
-    
+
     return jsonify({
         "status": sync_progress["status"],
         "processed": sync_progress["processed"],
@@ -1924,6 +1932,110 @@ def sync_domains_progress():
         "domains_updated": sync_progress["domains_updated"],
         "errors": sync_progress["errors"][-5:] if sync_progress["errors"] else []  # Last 5 errors
     })
+
+@app.route('/api/stop-sync', methods=['POST'])
+def stop_sync():
+    """Stop the current sync process"""
+    global sync_progress
+
+    if sync_progress["status"] == "running":
+        sync_progress["should_stop"] = True
+        return jsonify({"status": "stopping"})
+    else:
+        return jsonify({"error": "No sync in progress"}), 400
+
+@app.route('/api/sync-selected-domains', methods=['POST'])
+def sync_selected_domains():
+    """Sync only selected domains"""
+    global sync_progress
+
+    try:
+        data = request.get_json()
+        selected_domains = data.get('domains', [])
+
+        if not selected_domains:
+            return jsonify({"error": "No domains selected"}), 400
+
+        # Check if sync is already running
+        if sync_progress["status"] == "running":
+            return jsonify({"error": "Sync already in progress"}), 409
+
+        # Reset progress
+        sync_progress = {
+            "status": "starting",
+            "processed": 0,
+            "total": len(selected_domains),
+            "current_domain": "",
+            "domains_added": 0,
+            "domains_updated": 0,
+            "errors": [],
+            "should_stop": False
+        }
+
+        # Start background sync for selected domains
+        def sync_selected():
+            global sync_progress
+            sync_progress["status"] = "running"
+
+            for i, domain_name in enumerate(selected_domains, 1):
+                # Check if sync should stop
+                if sync_progress["should_stop"]:
+                    sync_progress["status"] = "stopped"
+                    sync_progress["current_domain"] = ""
+                    return
+
+                sync_progress["processed"] = i
+                sync_progress["current_domain"] = domain_name
+
+                try:
+                    # Sync single domain with retry logic
+                    retry = 0
+                    max_retries = 3
+                    synced = False
+
+                    while retry < max_retries and not synced:
+                        try:
+                            # Get redirections for this domain
+                            redirections = email_manager.api_client.get_domain_redirections(domain_name)
+
+                            if redirections is not None:
+                                # Update domain redirections
+                                db.add_or_update_domain(domain_name)
+                                db.update_domain_redirections(domain_name, redirections)
+                                db.update_domain_sync_status(domain_name, 'synced')
+                                sync_progress["domains_updated"] += 1
+                                synced = True
+                            else:
+                                db.update_domain_sync_status(domain_name, 'not_synced')
+
+                        except Exception as e:
+                            retry += 1
+                            error_msg = str(e).lower()
+                            if ("too many requests" in error_msg or "rate limit" in error_msg) and retry < max_retries:
+                                time.sleep(5 * retry)  # Progressive delay
+                            else:
+                                sync_progress["errors"].append(f"{domain_name}: {str(e)}")
+                                db.update_domain_sync_status(domain_name, 'not_synced')
+                                break
+
+                    # Add delay between domains
+                    if i < len(selected_domains):
+                        time.sleep(1.5)
+
+                except Exception as e:
+                    sync_progress["errors"].append(f"{domain_name}: {str(e)}")
+
+            sync_progress["status"] = "completed"
+            sync_progress["current_domain"] = ""
+
+        thread = threading.Thread(target=sync_selected)
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({"status": "started", "total": len(selected_domains)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/sync-single-domain', methods=['POST'])
 @require_auth
@@ -2670,7 +2782,8 @@ def sync_domains_form():
             "current_domain": "",
             "domains_added": 0,
             "domains_updated": 0,
-            "errors": []
+            "errors": [],
+            "should_stop": False
         }
         
         sync_thread = threading.Thread(target=background_sync_with_rate_limiting)

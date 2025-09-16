@@ -65,6 +65,33 @@ function App() {
     }
   };
 
+  const stopSync = async () => {
+    try {
+      await axios.post('/api/stop-sync');
+    } catch (error) {
+      console.error('Error stopping sync:', error);
+    }
+  };
+
+  const syncSelectedDomains = async () => {
+    try {
+      if (selectedDomains.length === 0) {
+        alert('Please select domains to sync');
+        return;
+      }
+      setSyncInProgress(true);
+      await axios.post('/api/sync-selected-domains', { domains: selectedDomains });
+    } catch (error) {
+      console.error('Error syncing selected domains:', error);
+      if (error.response?.data?.error === 'Sync already in progress') {
+        alert('A sync is already in progress. Please wait for it to complete or stop it first.');
+      } else {
+        alert('Error syncing selected domains: ' + (error.response?.data?.error || error.message));
+      }
+      setSyncInProgress(false);
+    }
+  };
+
   const handleSaveRedirect = async (domainName, redirectUrl) => {
     try {
       const response = await axios.post('/update-redirect', {
@@ -221,6 +248,24 @@ function App() {
               disabled={syncInProgress}
             >
               {syncInProgress ? '🔄 Syncing...' : '🔄 Sync All Domains from Namecheap'}
+            </button>
+
+            {syncInProgress && (
+              <button
+                className="btn"
+                onClick={stopSync}
+                style={{ backgroundColor: '#ef4444' }}
+              >
+                ⏹ Stop Sync
+              </button>
+            )}
+
+            <button
+              className="btn"
+              onClick={syncSelectedDomains}
+              disabled={selectedDomains.length === 0 || syncInProgress}
+            >
+              🔄 Sync Selected ({selectedDomains.length})
             </button>
 
             <button

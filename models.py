@@ -283,6 +283,12 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('UPDATE clients SET client_url = ? WHERE id = ?', (client_url, client_id))
+
+    def update_client(self, client_id: int, client_name: str, client_url: str):
+        """Update client name and URL"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE clients SET client_name = ?, client_url = ? WHERE id = ?', (client_name, client_url, client_id))
     
     def delete_client(self, client_id: int):
         """Delete client"""
