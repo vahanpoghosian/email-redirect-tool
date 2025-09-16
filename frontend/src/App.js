@@ -135,7 +135,32 @@ function App() {
       }
     } catch (error) {
       console.error('Error with bulk update:', error);
-      return { success: false, error: error.message };
+
+      // Handle axios error responses with better formatting
+      let errorMessage = 'Unknown error occurred';
+      if (error.response) {
+        // Server responded with error status
+        if (error.response.data && error.response.data.error) {
+          errorMessage = error.response.data.error;
+        } else if (error.response.data && typeof error.response.data === 'string') {
+          errorMessage = error.response.data;
+        } else {
+          errorMessage = `Server error: ${error.response.status}`;
+        }
+      } else if (error.request) {
+        // Request was made but no response received
+        errorMessage = 'Network error - no response from server';
+      } else {
+        // Something else happened
+        errorMessage = error.message;
+      }
+
+      // Truncate very long error messages (like base64 strings)
+      if (errorMessage.length > 200) {
+        errorMessage = errorMessage.substring(0, 200) + '... (error truncated)';
+      }
+
+      return { success: false, error: errorMessage };
     }
   };
 
