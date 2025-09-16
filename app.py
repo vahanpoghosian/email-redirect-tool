@@ -101,6 +101,9 @@ DASHBOARD_TEMPLATE = """
             <div id="sync-status" style="display: none; margin-bottom: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                 <div id="sync-text" style="font-weight: 600; margin-bottom: 0.5rem; color: #1e293b;">Status: In Progress</div>
                 <div id="sync-details" style="color: #6b7280;">Starting sync...</div>
+                <div class="progress-bar" style="margin-top: 0.5rem;">
+                    <div id="sync-progress-fill" class="progress-fill" style="width: 0%;"></div>
+                </div>
             </div>
             
             <!-- Bulk update status display -->
@@ -151,7 +154,15 @@ DASHBOARD_TEMPLATE = """
                                 </td>
                                 <td>
                                     <!-- Status will be shown only after save action -->
-                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;"></span>
+                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;">
+                                        {% if domain.sync_status == 'synced' %}
+                                            <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
+                                        {% elif domain.sync_status == 'not_synced' %}
+                                            <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
+                                        {% else %}
+                                            <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
+                                        {% endif %}
+                                    </span>
                                 </td>
                                 </tr>
                                 {% endfor %}
@@ -177,7 +188,15 @@ DASHBOARD_TEMPLATE = """
                                 </td>
                                 <td>
                                     <!-- Status will be shown only after save action -->
-                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;"></span>
+                                    <span class="sync-status-cell" id="status-{{ domain.domain_name.replace('.', '-') }}" style="min-height: 1.5rem; display: inline-block;">
+                                        {% if domain.sync_status == 'synced' %}
+                                            <span style="color: #10b981; font-weight: 600;">✅ Synced</span>
+                                        {% elif domain.sync_status == 'not_synced' %}
+                                            <span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>
+                                        {% else %}
+                                            <span style="color: #6b7280; font-weight: 600;">⚪ Unchanged</span>
+                                        {% endif %}
+                                    </span>
                                 </td>
                                 </tr>
                             {% endif %}
@@ -1164,27 +1183,39 @@ DASHBOARD_TEMPLATE = """
                 const statusDiv = document.getElementById('sync-status');
                 const statusText = document.getElementById('sync-text');
                 const statusDetails = document.getElementById('sync-details');
-                
+                const progressFill = document.getElementById('sync-progress-fill');
+
                 if (statusDiv && statusText && statusDetails) {
                     if (data.status === 'running') {
                         statusDiv.style.display = 'block';
                         statusDiv.style.borderLeftColor = '#3b82f6';
-                        
+
                         statusText.textContent = 'Status: In Progress';
-                        
+
                         let details = `Synced ${data.processed} of ${data.total} domains`;
                         if (data.current_domain) {
                             details += ` (Currently: ${data.current_domain})`;
                         }
                         details += `<br>Added: ${data.domains_added} | Updated: ${data.domains_updated} | Errors: ${data.errors.length}`;
-                        
+
                         statusDetails.innerHTML = details;
+
+                        // Update progress bar
+                        if (progressFill && data.total > 0) {
+                            const percentage = Math.round((data.processed / data.total) * 100);
+                            progressFill.style.width = `${percentage}%`;
+                        }
                         
                     } else if (data.status === 'completed') {
                         statusDiv.style.borderLeftColor = '#10b981';
                         statusText.textContent = 'Status: Completed';
                         statusDetails.innerHTML = `Successfully synced ${data.processed} of ${data.total} domains<br>Added: ${data.domains_added} | Updated: ${data.domains_updated} | Errors: ${data.errors.length}`;
-                        
+
+                        // Set progress bar to 100%
+                        if (progressFill) {
+                            progressFill.style.width = '100%';
+                        }
+
                         // Stop monitoring and reload page after delay
                         clearInterval(syncProgressInterval);
                         setTimeout(function() {
@@ -1257,15 +1288,22 @@ DASHBOARD_TEMPLATE = """
             }
             
             try {
-                const formData = new FormData(form);
+                // Send as JSON for proper AJAX handling
                 const response = await fetch('/update-redirect', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        domain: domainName,
+                        target: newUrl
+                    })
                 });
-                
+
                 console.log('Response status:', response.status);
+                const responseData = await response.json();
                 
-                if (response.ok) {
+                if (response.ok && responseData.status === 'success') {
                     // Success - show synced status and keep the new URL
                     if (statusElement) {
                         statusElement.innerHTML = '<span style="color: #10b981; font-weight: 600;">✅ Synced</span>';
@@ -1273,12 +1311,15 @@ DASHBOARD_TEMPLATE = """
                     }
                     // Keep the updated URL in the input field
                     targetInput.value = newUrl;
+                    console.log('Redirect updated successfully:', responseData.message);
                 } else {
                     // Error - show not synced status
                     if (statusElement) {
                         statusElement.innerHTML = '<span style="color: #ef4444; font-weight: 600;">❌ Not Synced</span>';
                         console.log('Status updated to Not Synced');
                     }
+                    const errorMsg = responseData.error || 'Unknown error occurred';
+                    console.error('Update failed:', errorMsg);
                 }
             } catch (error) {
                 // Error - show not synced status
@@ -2471,26 +2512,53 @@ def load_domains_form():
 def update_redirect_form():
     """Handle individual redirect update form submission"""
     try:
-        domain = request.form.get('domain')
-        target = request.form.get('target')
-        
+        # Check if it's an AJAX request (JSON response expected)
+        if request.headers.get('Content-Type') == 'application/json' or request.is_json:
+            data = request.get_json()
+            domain = data.get('domain')
+            target = data.get('target')
+        else:
+            # Form submission
+            domain = request.form.get('domain')
+            target = request.form.get('target')
+
         if not domain or not target:
+            if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                return jsonify({"error": "Domain and target are required"}), 400
             return "Domain and target are required", 400
-        
+
         # Update via Namecheap API
         success = email_manager.api_client.set_domain_redirection(domain, '@', target)
-        
+
         if success:
             # Update sync status
             db.update_domain_sync_status(domain, 'synced')
-            return redirect(url_for('dashboard'))
+
+            # Return JSON for AJAX requests
+            if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                return jsonify({
+                    "status": "success",
+                    "message": f"Successfully updated redirection for {domain}",
+                    "domain": domain,
+                    "target": target
+                })
+            else:
+                return redirect(url_for('dashboard'))
         else:
             db.update_domain_sync_status(domain, 'not_synced')
-            return f"Failed to update redirection for {domain}", 500
-            
+
+            if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                return jsonify({"error": f"Failed to update redirection for {domain}"}), 500
+            else:
+                return f"Failed to update redirection for {domain}", 500
+
     except Exception as e:
         db.update_domain_sync_status(domain, 'not_synced')
-        return f"Error updating redirect: {str(e)}", 500
+
+        if request.is_json or request.headers.get('Content-Type') == 'application/json':
+            return jsonify({"error": f"Error updating redirect: {str(e)}"}), 500
+        else:
+            return f"Error updating redirect: {str(e)}", 500
 
 @app.route('/bulk-update', methods=['POST'])
 @require_auth
