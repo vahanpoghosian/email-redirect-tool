@@ -1593,6 +1593,7 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/', methods=['GET'])
+@require_auth
 def index():
     """Serve React app"""
     try:
@@ -2160,7 +2161,7 @@ def bulk_update():
                 })
         
         return jsonify({
-            "status": "completed",
+            "status": "success",
             "results": results,
             "total_processed": len(results)
         })
