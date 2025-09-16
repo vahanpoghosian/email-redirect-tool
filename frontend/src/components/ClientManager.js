@@ -35,8 +35,8 @@ const ClientManager = ({ clients: initialClients, onClose }) => {
 
     try {
       const response = await axios.post('/api/clients', {
-        client_name: newClientName.trim(),
-        client_url: newClientUrl.trim() || null
+        name: newClientName.trim(),
+        url: newClientUrl.trim() || null
       });
 
       if (response.data.status === 'success') {
@@ -71,8 +71,8 @@ const ClientManager = ({ clients: initialClients, onClose }) => {
 
     try {
       const response = await axios.put(`/api/clients/${editingClient.id}`, {
-        client_name: newClientName.trim(),
-        client_url: newClientUrl.trim() || null
+        name: newClientName.trim(),
+        url: newClientUrl.trim() || null
       });
 
       if (response.data.status === 'success') {
