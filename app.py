@@ -2470,7 +2470,7 @@ def get_domains():
             redirect_url = ''
             redirections = db_domain.get('redirections', [])
             for redirect in redirections:
-                if redirect.get('name') == '@' and redirect.get('type') == 'URL':
+                if redirect.get('name') == '@' and (redirect.get('type') == 'URL' or redirect.get('type') == 'URL Redirect'):
                     redirect_url = redirect.get('target', '')
                     break
 
