@@ -2123,6 +2123,15 @@ def bulk_update():
                     # Update sync status based on verification
                     if verified:
                         db.update_domain_sync_status(domain_name, 'synced')
+
+                        # Fetch and store the actual redirections from Namecheap to database
+                        try:
+                            redirections = email_manager.api_client.get_domain_redirections(domain_name)
+                            if redirections:
+                                db.update_redirections(domain_name, redirections)
+                                print(f"✅ Bulk: Updated database with {len(redirections)} redirections for {domain_name}")
+                        except Exception as e:
+                            print(f"⚠️ Bulk: Warning: Could not fetch redirections for {domain_name}: {e}")
                     else:
                         db.update_domain_sync_status(domain_name, 'not_synced')
                 else:
@@ -2136,10 +2145,10 @@ def bulk_update():
                     "total": len(updates)
                 })
                 
-                # Add delay between updates
+                # Add delay between updates using same rate limiting as main sync
                 if i < len(updates) - 1:
                     import time
-                    time.sleep(0.6)
+                    time.sleep(1.5)  # Use same 1.5s delay as main sync
                 
             except Exception as e:
                 results.append({
@@ -2644,7 +2653,6 @@ def load_domains_form():
     return redirect(url_for('dashboard'))
 
 @app.route('/update-redirect', methods=['POST'])
-@require_auth
 def update_redirect_form():
     """Handle individual redirect update form submission"""
     try:
@@ -2675,6 +2683,15 @@ def update_redirect_form():
             if verified:
                 # Update sync status
                 db.update_domain_sync_status(domain, 'synced')
+
+                # Fetch and store the actual redirections from Namecheap to database
+                try:
+                    redirections = email_manager.api_client.get_domain_redirections(domain)
+                    if redirections:
+                        db.update_redirections(domain, redirections)
+                        print(f"✅ Updated database with {len(redirections)} redirections for {domain}")
+                except Exception as e:
+                    print(f"⚠️ Warning: Could not fetch redirections for {domain}: {e}")
 
                 # Return JSON for AJAX requests
                 if request.is_json or request.headers.get('Content-Type') == 'application/json':
