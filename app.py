@@ -2241,6 +2241,9 @@ def bulk_update():
                             verified = email_manager.api_client.verify_domain_redirection(domain_name, name, target)
 
                             if verified:
+                                # Ensure domain exists in database
+                                db.add_or_update_domain(domain_name)
+
                                 db.update_domain_sync_status(domain_name, 'synced')
 
                                 # Fetch and store the actual redirections from Namecheap to database
@@ -2635,9 +2638,12 @@ def get_domains():
             # Get the primary redirect URL from the redirections array
             redirect_url = ''
             redirections = db_domain.get('redirections', [])
+            print(f"DEBUG: Domain {domain_name} has {len(redirections)} redirections in DB")
             for redirect in redirections:
+                print(f"DEBUG: Redirect: name={redirect.get('name')}, type={redirect.get('type')}, target={redirect.get('target')}")
                 if redirect.get('name') == '@' and (redirect.get('type') == 'URL' or redirect.get('type') == 'URL Redirect'):
                     redirect_url = redirect.get('target', '')
+                    print(f"DEBUG: Using redirect URL: {redirect_url}")
                     break
 
             domain_obj = {
@@ -2865,6 +2871,9 @@ def update_redirect_form():
             verified = email_manager.api_client.verify_domain_redirection(domain, '@', target)
 
             if verified:
+                # Ensure domain exists in database
+                db.add_or_update_domain(domain)
+
                 # Update sync status
                 db.update_domain_sync_status(domain, 'synced')
 

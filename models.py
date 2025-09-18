@@ -8,8 +8,16 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 class Database:
-    def __init__(self, db_path: str = 'redirect_tool.db'):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        # Use provided path or default to current directory
+        if db_path:
+            self.db_path = db_path
+        else:
+            import os
+            # Use environment variable if available (for production)
+            self.db_path = os.environ.get('DATABASE_PATH', 'redirect_tool.db')
+
+        print(f"Using database at: {self.db_path}")
         self.init_database()
     
     def get_connection(self):
