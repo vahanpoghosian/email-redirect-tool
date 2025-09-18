@@ -92,6 +92,52 @@ function App() {
     }
   };
 
+  const backupDatabase = async () => {
+    try {
+      const response = await axios.post('/api/backup-database');
+      if (response.data.status === 'success') {
+        // Store backup data in localStorage as a simple solution
+        const backupData = {
+          timestamp: new Date().toISOString(),
+          domains: domains,
+          clients: clients
+        };
+        localStorage.setItem('db_backup', JSON.stringify(backupData));
+        alert(`Database backed up locally! Domains: ${response.data.domains_count}, Clients: ${response.data.clients_count}`);
+      }
+    } catch (error) {
+      console.error('Error backing up database:', error);
+      alert('Error creating backup: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
+  const restoreDatabase = async () => {
+    try {
+      const backupData = localStorage.getItem('db_backup');
+      if (!backupData) {
+        alert('No backup found in local storage');
+        return;
+      }
+
+      if (!window.confirm('This will restore the database from your local backup. Continue?')) {
+        return;
+      }
+
+      const response = await axios.post('/api/restore-database', {
+        backup_data: JSON.parse(backupData)
+      });
+
+      if (response.data.status === 'success') {
+        alert(`Database restored! Domains: ${response.data.restored_domains}, Clients: ${response.data.restored_clients}`);
+        // Reload the page to show restored data
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('Error restoring database:', error);
+      alert('Error restoring backup: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
   const handleSaveRedirect = async (domainName, redirectUrl) => {
     try {
       const response = await axios.post('/update-redirect', {
@@ -288,6 +334,22 @@ function App() {
               onClick={loadDomainsAndClients}
             >
               📁 Refresh
+            </button>
+
+            <button
+              className="btn"
+              onClick={backupDatabase}
+              style={{ backgroundColor: '#6366f1' }}
+            >
+              💾 Backup DB
+            </button>
+
+            <button
+              className="btn"
+              onClick={restoreDatabase}
+              style={{ backgroundColor: '#8b5cf6' }}
+            >
+              🔄 Restore DB
             </button>
           </div>
 

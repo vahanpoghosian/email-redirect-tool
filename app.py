@@ -1930,8 +1930,104 @@ def sync_domains_progress():
         "current_domain": sync_progress["current_domain"],
         "domains_added": sync_progress["domains_added"],
         "domains_updated": sync_progress["domains_updated"],
-        "errors": sync_progress["errors"][-5:] if sync_progress["errors"] else []  # Last 5 errors
+        "errors": sync_progress["errors"][-5:] if sync_progress["errors"] else [],  # Last 5 errors
+        "total_errors": len(sync_progress["errors"]) if sync_progress["errors"] else 0
     })
+
+@app.route('/api/sync-errors', methods=['GET'])
+def get_sync_errors():
+    """Get detailed sync errors"""
+    global sync_progress
+
+    return jsonify({
+        "errors": sync_progress["errors"] if sync_progress["errors"] else [],
+        "total_errors": len(sync_progress["errors"]) if sync_progress["errors"] else 0,
+        "last_sync_status": sync_progress["status"]
+    })
+
+@app.route('/api/backup-database', methods=['POST'])
+def backup_database():
+    """Create a backup of current database state"""
+    try:
+        import json
+        from datetime import datetime
+
+        # Get all data
+        domains = db.get_all_domains_with_redirections()
+        clients = db.get_all_clients()
+
+        backup_data = {
+            "timestamp": datetime.now().isoformat(),
+            "domains": domains,
+            "clients": clients
+        }
+
+        # Save to a backup file (this would ideally be sent to external storage)
+        backup_filename = f"db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(backup_filename, 'w') as f:
+            json.dump(backup_data, f, indent=2)
+
+        return jsonify({
+            "status": "success",
+            "message": f"Database backed up to {backup_filename}",
+            "backup_file": backup_filename,
+            "domains_count": len(domains),
+            "clients_count": len(clients)
+        })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/restore-database', methods=['POST'])
+def restore_database():
+    """Restore database from backup data"""
+    try:
+        data = request.get_json()
+        backup_data = data.get('backup_data')
+
+        if not backup_data:
+            return jsonify({"status": "error", "message": "No backup data provided"}), 400
+
+        # Restore clients first
+        clients = backup_data.get('clients', [])
+        for client in clients:
+            try:
+                # Skip default "Unassigned" client
+                if client.get('name') != 'Unassigned':
+                    db.add_client(client.get('name'), client.get('url'))
+            except Exception as e:
+                print(f"Warning: Could not restore client {client.get('name')}: {e}")
+
+        # Restore domains and redirections
+        domains = backup_data.get('domains', [])
+        for domain in domains:
+            try:
+                domain_name = domain.get('domain_name')
+                if domain_name:
+                    # Add domain
+                    db.add_or_update_domain(domain_name)
+
+                    # Restore redirections
+                    redirections = domain.get('redirections', [])
+                    if redirections:
+                        db.update_redirections(domain_name, redirections)
+
+                    # Restore client assignment
+                    if domain.get('client_id'):
+                        db.assign_domain_to_client(domain_name, domain.get('client_id'))
+
+            except Exception as e:
+                print(f"Warning: Could not restore domain {domain.get('domain_name')}: {e}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Database restored successfully",
+            "restored_domains": len(domains),
+            "restored_clients": len(clients)
+        })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/stop-sync', methods=['POST'])
 def stop_sync():
@@ -2641,10 +2737,22 @@ def get_domains():
             print(f"DEBUG: Domain {domain_name} has {len(redirections)} redirections in DB")
             for redirect in redirections:
                 print(f"DEBUG: Redirect: name={redirect.get('name')}, type={redirect.get('type')}, target={redirect.get('target')}")
-                if redirect.get('name') == '@' and (redirect.get('type') == 'URL' or redirect.get('type') == 'URL Redirect'):
-                    redirect_url = redirect.get('target', '')
-                    print(f"DEBUG: Using redirect URL: {redirect_url}")
-                    break
+                # Check for @ record with any URL type
+                if redirect.get('name') == '@':
+                    redirect_type = redirect.get('type', '').lower()
+                    if 'url' in redirect_type or redirect_type in ['url', 'url redirect', 'redirect']:
+                        redirect_url = redirect.get('target', '')
+                        print(f"DEBUG: Using redirect URL: {redirect_url}")
+                        break
+
+            # If no @ record found, check for any URL redirect as fallback
+            if not redirect_url:
+                for redirect in redirections:
+                    redirect_type = redirect.get('type', '').lower()
+                    if 'url' in redirect_type and redirect.get('target'):
+                        redirect_url = redirect.get('target', '')
+                        print(f"DEBUG: Fallback - Using redirect URL: {redirect_url}")
+                        break
 
             domain_obj = {
                 "domain_name": domain_name,

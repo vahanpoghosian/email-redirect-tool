@@ -84,8 +84,8 @@ const SyncProgress = ({ onComplete }) => {
             )}
             <br />
             Added: {progress.domains_added} | Updated: {progress.domains_updated}
-            {progress.errors.length > 0 && (
-              <> | Errors: {progress.errors.length}</>
+            {(progress.total_errors || progress.errors.length) > 0 && (
+              <> | Errors: {progress.total_errors || progress.errors.length}</>
             )}
           </>
         )}
@@ -95,8 +95,8 @@ const SyncProgress = ({ onComplete }) => {
             Successfully synced {progress.processed} of {progress.total} domains
             <br />
             Added: {progress.domains_added} | Updated: {progress.domains_updated}
-            {progress.errors.length > 0 && (
-              <> | Errors: {progress.errors.length}</>
+            {(progress.total_errors || progress.errors.length) > 0 && (
+              <> | Errors: {progress.total_errors || progress.errors.length}</>
             )}
             <br />
             <em>Refreshing page in 3 seconds...</em>
@@ -126,6 +126,28 @@ const SyncProgress = ({ onComplete }) => {
       {progress.status === 'running' && (
         <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
           {getProgressPercentage()}% complete
+        </div>
+      )}
+
+      {/* Show detailed errors if any */}
+      {progress.errors && progress.errors.length > 0 && (
+        <div style={{
+          marginTop: '1rem',
+          padding: '0.75rem',
+          backgroundColor: '#fef2f2',
+          borderRadius: '6px',
+          borderLeft: '4px solid #ef4444'
+        }}>
+          <div style={{ fontWeight: '600', fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.5rem' }}>
+            Recent Sync Errors ({progress.total_errors || progress.errors.length} total):
+          </div>
+          <div style={{ fontSize: '0.8rem', color: '#7f1d1d' }}>
+            {progress.errors.slice(-5).map((error, index) => (
+              <div key={index} style={{ marginBottom: '0.25rem', fontFamily: 'monospace' }}>
+                • {error}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
