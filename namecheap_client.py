@@ -762,9 +762,10 @@ class NamecheapAPIClient:
             print(f"🔍 DEBUG: DomainDNSGetHostsResult content: {hosts_result}")
 
             # Find Host data (may be namespaced or direct)
+            # Note: Namecheap uses lowercase 'host' in the response
             host_data = None
             for key, value in hosts_result.items():
-                if 'Host' in key:
+                if 'host' in key.lower():  # Check for both 'Host' and 'host'
                     host_data = value
                     print(f"🔍 DEBUG: Found Host data in key: {key}")
                     break
@@ -775,6 +776,10 @@ class NamecheapAPIClient:
                 for key, value in hosts_result.items():
                     if 'error' in key.lower() or 'Error' in key:
                         print(f"❌ DEBUG: API Error found: {key} = {value}")
+                # Check if domain has no DNS records (empty result is valid)
+                if 'IsUsingOurDNS' in hosts_result and hosts_result.get('IsUsingOurDNS') == 'true':
+                    print(f"ℹ️ INFO: Domain {domain} is using Namecheap DNS but has no host records configured")
+                    return []  # Empty list is valid
                 return []
             
             # Handle single host or list of hosts
@@ -782,15 +787,30 @@ class NamecheapAPIClient:
                 host_data = [host_data]
 
             print(f"🔍 DEBUG: Raw host_data type: {type(host_data)}")
-            print(f"🔍 DEBUG: Host data content: {host_data}")
+            print(f"🔍 DEBUG: Number of records: {len(host_data) if host_data else 0}")
 
             if not host_data:
                 print(f"⚠️  WARNING: No host data returned for {domain}")
                 return []
 
-            print(f"✅ DEBUG: Successfully retrieved {len(host_data)} DNS records")
+            # Normalize the host data format
+            normalized_hosts = []
+            for host in host_data:
+                if isinstance(host, dict):
+                    # Map lowercase field names to expected format
+                    normalized_host = {
+                        'Name': host.get('Name', host.get('name', '@')),
+                        'Type': host.get('Type', host.get('type', '')),
+                        'Address': host.get('Address', host.get('address', '')),
+                        'TTL': host.get('TTL', host.get('ttl', '1800')),
+                        'MXPref': host.get('MXPref', host.get('mxpref', ''))
+                    }
+                    normalized_hosts.append(normalized_host)
+                    print(f"  📝 Record: {normalized_host['Type']} - {normalized_host['Name']} -> {normalized_host['Address'][:50]}...")
 
-            return host_data
+            print(f"✅ Successfully retrieved {len(normalized_hosts)} DNS records for {domain}")
+
+            return normalized_hosts
             
         except Exception as e:
             print(f"Error getting all hosts for {domain}: {e}")
