@@ -503,40 +503,76 @@ class NamecheapAPIClient:
             print(f"❌ Error setting email forwarding for {domain}: {e}")
             return False
     
-    def set_domain_redirection(self, domain: str, name: str, target: str) -> bool:
-        """Set domain URL redirection for a domain"""
+    def set_domain_redirection_safe(self, domain: str, name: str, target: str) -> bool:
+        """
+        SAFER version: Set domain URL redirection with better verification
+        This is a research function to understand the data structure better
+        """
         try:
-            print(f"🔍 Getting existing DNS records for {domain}...")
-            # First get existing hosts to preserve non-URL records
+            print(f"🔍 [SAFE MODE] Analyzing DNS structure for {domain}...")
+
+            # Get existing hosts to understand the structure
             existing_hosts = self._get_all_hosts(domain)
 
             print(f"📋 Found {len(existing_hosts)} existing DNS records:")
-            for i, host in enumerate(existing_hosts):
-                print(f"  {i+1}. {host.get('Name', 'N/A')} {host.get('Type', 'N/A')} → {host.get('Address', 'N/A')}")
+            print(f"📋 Raw data structure: {existing_hosts}")
 
-            # SAFETY CHECK: If we don't have any existing hosts, this is DANGEROUS
-            if not existing_hosts:
-                print(f"🚨 CRITICAL WARNING: No existing DNS records found for {domain}")
-                print(f"🚨 This suggests an API issue or domain has no DNS records")
-                print(f"🚨 Setting URL redirect would REPLACE ALL DNS with just the redirect")
-                print(f"🚨 ABORTING to prevent DNS record deletion!")
+            # Analyze what we have
+            analysis = {
+                "total_records": len(existing_hosts),
+                "url_redirects": [],
+                "other_records": [],
+                "record_types": set()
+            }
+
+            for host in existing_hosts:
+                record_type = host.get('Type', 'UNKNOWN')
+                analysis["record_types"].add(record_type)
+
+                if record_type == 'URL':
+                    analysis["url_redirects"].append({
+                        "name": host.get('Name'),
+                        "target": host.get('Address'),
+                        "ttl": host.get('TTL')
+                    })
+                else:
+                    analysis["other_records"].append({
+                        "name": host.get('Name'),
+                        "type": record_type,
+                        "address": host.get('Address'),
+                        "ttl": host.get('TTL'),
+                        "mx_pref": host.get('MXPref', '')
+                    })
+
+            print(f"📊 ANALYSIS:")
+            print(f"   Total records: {analysis['total_records']}")
+            print(f"   URL redirects: {len(analysis['url_redirects'])}")
+            print(f"   Other DNS records: {len(analysis['other_records'])}")
+            print(f"   Record types found: {analysis['record_types']}")
+
+            # Check if it's safe to proceed
+            is_safe = len(analysis['other_records']) == 0
+            print(f"🛡️  Safe to modify: {is_safe}")
+
+            if not is_safe:
+                print(f"⚠️  DANGER: Domain has {len(analysis['other_records'])} non-URL DNS records")
+                print(f"⚠️  Modifying would delete: {[r['type'] for r in analysis['other_records']]}")
                 return False
 
-            # Additional safety: Check if we have reasonable DNS records
-            non_url_records = [h for h in existing_hosts if h.get('Type') != 'URL']
-            if len(existing_hosts) > 0 and len(non_url_records) == 0:
-                print(f"⚠️  NOTICE: Domain {domain} only has URL redirects, no other DNS records")
-                print(f"⚠️  This is safe to proceed with")
+            print(f"✅ Domain only has URL redirects - safe to proceed")
+            return True
 
-            # Remove existing URL redirection with same name
-            hosts_to_keep = [h for h in existing_hosts if not (h.get('Type') == 'URL' and h.get('Name') == name)]
+        except Exception as e:
+            print(f"❌ Error in safe redirect analysis: {e}")
+            return False
 
-            print(f"🛡️  Keeping {len(hosts_to_keep)} existing records, adding 1 URL redirect")
+    def set_domain_redirection(self, domain: str, name: str, target: str) -> bool:
+        """Set domain URL redirection for a domain - CURRENTLY DISABLED FOR SAFETY"""
+        print(f"🚨 REDIRECT UPDATE BLOCKED - Safety mode active")
+        print(f"🚨 Domain: {domain}, Name: {name}, Target: {target}")
 
-            # Final safety check
-            total_records_after = len(hosts_to_keep) + 1
-            print(f"🔍 Total DNS records before: {len(existing_hosts)}")
-            print(f"🔍 Total DNS records after: {total_records_after}")
+        # Run safe analysis instead
+        return self.set_domain_redirection_safe(domain, name, target)
             
             # Add the new redirection
             new_host = {
@@ -663,7 +699,11 @@ class NamecheapAPIClient:
                 SLD=sld,
                 TLD=tld
             )
-            
+
+            print(f"🔍 DEBUG: Full API response structure:")
+            print(f"🔍 DEBUG: Response keys: {list(response.keys())}")
+            print(f"🔍 DEBUG: Full response: {response}")
+
             hosts = []
             
             # Find CommandResponse (may be namespaced)

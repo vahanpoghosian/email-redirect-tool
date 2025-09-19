@@ -1978,6 +1978,69 @@ def backup_database():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/api/debug-dns/<domain_name>', methods=['GET'])
+def debug_dns_records(domain_name):
+    """Debug DNS records for a specific domain"""
+    try:
+        if not email_manager:
+            return jsonify({"error": "Email manager not initialized"}), 503
+
+        print(f"🔍 DEBUGGING DNS for domain: {domain_name}")
+
+        # Get all DNS records
+        dns_records = email_manager.api_client._get_all_hosts(domain_name)
+
+        print(f"📋 Retrieved {len(dns_records)} DNS records")
+
+        # Categorize records
+        categorized = {
+            "url_redirects": [],
+            "a_records": [],
+            "cname_records": [],
+            "mx_records": [],
+            "txt_records": [],
+            "other_records": []
+        }
+
+        for record in dns_records:
+            record_type = record.get('Type', '').upper()
+            record_info = {
+                "name": record.get('Name', ''),
+                "type": record_type,
+                "address": record.get('Address', ''),
+                "ttl": record.get('TTL', ''),
+                "mx_pref": record.get('MXPref', '')
+            }
+
+            if record_type == 'URL':
+                categorized["url_redirects"].append(record_info)
+            elif record_type == 'A':
+                categorized["a_records"].append(record_info)
+            elif record_type == 'CNAME':
+                categorized["cname_records"].append(record_info)
+            elif record_type == 'MX':
+                categorized["mx_records"].append(record_info)
+            elif record_type == 'TXT':
+                categorized["txt_records"].append(record_info)
+            else:
+                categorized["other_records"].append(record_info)
+
+        return jsonify({
+            "status": "success",
+            "domain": domain_name,
+            "total_records": len(dns_records),
+            "raw_records": dns_records,
+            "categorized": categorized,
+            "analysis": {
+                "has_url_redirects": len(categorized["url_redirects"]) > 0,
+                "has_other_dns": len(dns_records) - len(categorized["url_redirects"]) > 0,
+                "safe_to_modify": len(categorized["url_redirects"]) > 0 and len(dns_records) == len(categorized["url_redirects"])
+            }
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/restore-database', methods=['POST'])
 def restore_database():
     """Restore database from backup data"""
