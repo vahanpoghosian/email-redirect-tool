@@ -601,10 +601,27 @@ class NamecheapAPIClient:
 
             print(f"📦 Will send {len(complete_records)} DNS records to Namecheap")
 
-            # Log what we're sending
+            # Log what we're sending with detailed breakdown
             url_redirects = [r for r in complete_records if r['Type'] == 'URL']
-            other_records = [r for r in complete_records if r['Type'] != 'URL']
-            print(f"📊 Sending {len(url_redirects)} URL redirects, {len(other_records)} other DNS records")
+            mx_records = [r for r in complete_records if r['Type'] == 'MX']
+            a_records = [r for r in complete_records if r['Type'] == 'A']
+            cname_records = [r for r in complete_records if r['Type'] == 'CNAME']
+            txt_records = [r for r in complete_records if r['Type'] == 'TXT']
+            other_records = [r for r in complete_records if r['Type'] not in ['URL', 'MX', 'A', 'CNAME', 'TXT']]
+
+            print(f"📊 Sending to Namecheap:")
+            if mx_records:
+                print(f"  📧 {len(mx_records)} MX records (email)")
+            if a_records:
+                print(f"  🌐 {len(a_records)} A records")
+            if cname_records:
+                print(f"  🔗 {len(cname_records)} CNAME records")
+            if txt_records:
+                print(f"  📄 {len(txt_records)} TXT records (SPF/DKIM/DMARC)")
+            if url_redirects:
+                print(f"  ↗️  {len(url_redirects)} URL redirects")
+            if other_records:
+                print(f"  📝 {len(other_records)} other records")
 
             # STEP 3: Send complete record set to Namecheap
             print(f"🚀 Step 3: Sending complete DNS records to Namecheap...")
@@ -793,8 +810,10 @@ class NamecheapAPIClient:
                 print(f"⚠️  WARNING: No host data returned for {domain}")
                 return []
 
-            # Normalize the host data format
+            # Normalize the host data format and categorize by type
             normalized_hosts = []
+            record_types = {}
+
             for host in host_data:
                 if isinstance(host, dict):
                     # Map lowercase field names to expected format
@@ -806,9 +825,27 @@ class NamecheapAPIClient:
                         'MXPref': host.get('MXPref', host.get('mxpref', ''))
                     }
                     normalized_hosts.append(normalized_host)
-                    print(f"  📝 Record: {normalized_host['Type']} - {normalized_host['Name']} -> {normalized_host['Address'][:50]}...")
+
+                    # Count record types
+                    record_type = normalized_host['Type']
+                    record_types[record_type] = record_types.get(record_type, 0) + 1
+
+                    # Special logging for different record types
+                    if record_type == 'MX':
+                        print(f"  📧 MX Record: {normalized_host['Name']} -> {normalized_host['Address']} (Priority: {normalized_host['MXPref']})")
+                    elif record_type == 'A':
+                        print(f"  🌐 A Record: {normalized_host['Name']} -> {normalized_host['Address']}")
+                    elif record_type == 'CNAME':
+                        print(f"  🔗 CNAME: {normalized_host['Name']} -> {normalized_host['Address']}")
+                    elif record_type == 'TXT':
+                        print(f"  📄 TXT: {normalized_host['Name']} -> {normalized_host['Address'][:50]}...")
+                    elif record_type == 'URL':
+                        print(f"  ↗️  URL Redirect: {normalized_host['Name']} -> {normalized_host['Address']}")
+                    else:
+                        print(f"  📝 {record_type}: {normalized_host['Name']} -> {normalized_host['Address'][:50]}...")
 
             print(f"✅ Successfully retrieved {len(normalized_hosts)} DNS records for {domain}")
+            print(f"📊 Record types: {', '.join([f'{count} {rtype}' for rtype, count in record_types.items()])}")
 
             return normalized_hosts
             
