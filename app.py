@@ -577,7 +577,7 @@ DASHBOARD_TEMPLATE = """
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    const selectId = `client-${domainName.replace(/\./g, '-')}`;
+                    const selectId = `client-${domainName.replace(/\\./g, '-')}`;
                     const select = document.getElementById(selectId);
                     if (select) {
                         select.innerHTML = '<option value="">Unassigned</option>';
@@ -2394,6 +2394,15 @@ def bulk_update():
                         "processed": i + 1,
                         "total": len(updates)
                     })
+
+            except Exception as update_error:
+                results.append({
+                    "domain_name": update.get('domain_name', 'unknown'),
+                    "success": False,
+                    "error": str(update_error),
+                    "processed": i + 1,
+                    "total": len(updates)
+                })
 
         return jsonify({
             "status": "success",
