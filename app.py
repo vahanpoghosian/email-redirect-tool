@@ -2320,6 +2320,19 @@ def bulk_update():
                 name = update.get('name', '@')
                 target = update.get('target')
                 
+                # SAFETY MODE: Also disable bulk updates
+                SAFETY_MODE = True
+                if SAFETY_MODE:
+                    print(f"🚨 SAFETY MODE: Bulk updates temporarily disabled")
+                    results.append({
+                        "domain_name": domain_name,
+                        "success": False,
+                        "error": "Bulk updates temporarily disabled for safety - system was deleting DNS records",
+                        "processed": i + 1,
+                        "total": len(updates)
+                    })
+                    continue
+
                 # Update via Namecheap API with retry logic
                 success = False
                 verified = False
@@ -2933,6 +2946,21 @@ def update_redirect_form():
             if request.is_json or request.headers.get('Content-Type') == 'application/json':
                 return jsonify({"error": "Domain and target are required"}), 400
             return "Domain and target are required", 400
+
+        # SAFETY MODE: Temporarily disable redirect updates to prevent DNS deletion
+        # TODO: Remove this once DNS preservation is verified working
+        SAFETY_MODE = True
+
+        if SAFETY_MODE:
+            print(f"🚨 SAFETY MODE: Redirect updates temporarily disabled")
+            print(f"🚨 This prevents accidental deletion of other DNS records")
+            if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                return jsonify({
+                    "status": "error",
+                    "error": "Redirect updates temporarily disabled for safety. The system was deleting other DNS records. Please contact administrator."
+                }), 503
+            else:
+                return "Redirect updates temporarily disabled for safety", 503
 
         # Update via Namecheap API with retry logic
         success = False

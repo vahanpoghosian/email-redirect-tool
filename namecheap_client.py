@@ -506,11 +506,37 @@ class NamecheapAPIClient:
     def set_domain_redirection(self, domain: str, name: str, target: str) -> bool:
         """Set domain URL redirection for a domain"""
         try:
+            print(f"🔍 Getting existing DNS records for {domain}...")
             # First get existing hosts to preserve non-URL records
             existing_hosts = self._get_all_hosts(domain)
-            
+
+            print(f"📋 Found {len(existing_hosts)} existing DNS records:")
+            for i, host in enumerate(existing_hosts):
+                print(f"  {i+1}. {host.get('Name', 'N/A')} {host.get('Type', 'N/A')} → {host.get('Address', 'N/A')}")
+
+            # SAFETY CHECK: If we don't have any existing hosts, this is DANGEROUS
+            if not existing_hosts:
+                print(f"🚨 CRITICAL WARNING: No existing DNS records found for {domain}")
+                print(f"🚨 This suggests an API issue or domain has no DNS records")
+                print(f"🚨 Setting URL redirect would REPLACE ALL DNS with just the redirect")
+                print(f"🚨 ABORTING to prevent DNS record deletion!")
+                return False
+
+            # Additional safety: Check if we have reasonable DNS records
+            non_url_records = [h for h in existing_hosts if h.get('Type') != 'URL']
+            if len(existing_hosts) > 0 and len(non_url_records) == 0:
+                print(f"⚠️  NOTICE: Domain {domain} only has URL redirects, no other DNS records")
+                print(f"⚠️  This is safe to proceed with")
+
             # Remove existing URL redirection with same name
             hosts_to_keep = [h for h in existing_hosts if not (h.get('Type') == 'URL' and h.get('Name') == name)]
+
+            print(f"🛡️  Keeping {len(hosts_to_keep)} existing records, adding 1 URL redirect")
+
+            # Final safety check
+            total_records_after = len(hosts_to_keep) + 1
+            print(f"🔍 Total DNS records before: {len(existing_hosts)}")
+            print(f"🔍 Total DNS records after: {total_records_after}")
             
             # Add the new redirection
             new_host = {
@@ -612,6 +638,7 @@ class NamecheapAPIClient:
     def _get_all_hosts(self, domain: str) -> List[Dict]:
         """Get all DNS host records for a domain"""
         try:
+            print(f"🔍 DEBUG: Getting all hosts for {domain}")
             # Split domain into SLD and TLD as required by Namecheap API
             domain_parts = domain.split('.')
             if len(domain_parts) < 2:
@@ -672,7 +699,16 @@ class NamecheapAPIClient:
             # Handle single host or list of hosts
             if isinstance(host_data, dict):
                 host_data = [host_data]
-            
+
+            print(f"🔍 DEBUG: Raw host_data type: {type(host_data)}")
+            print(f"🔍 DEBUG: Host data content: {host_data}")
+
+            if not host_data:
+                print(f"⚠️  WARNING: No host data returned for {domain}")
+                return []
+
+            print(f"✅ DEBUG: Successfully retrieved {len(host_data)} DNS records")
+
             return host_data
             
         except Exception as e:
