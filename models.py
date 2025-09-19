@@ -158,10 +158,18 @@ class Database:
                     cursor.execute('SELECT id FROM clients WHERE client_name = ?', ('Unassigned',))
                     client_id = cursor.fetchone()[0]
                 
+                # Use INSERT OR IGNORE to handle race conditions
                 cursor.execute('''
-                    INSERT INTO domains (domain_number, domain_name, client_id)
+                    INSERT OR IGNORE INTO domains (domain_number, domain_name, client_id)
                     VALUES (?, ?, ?)
                 ''', (domain_number, domain_name, client_id))
+
+                # If it was ignored (already exists), get the existing one
+                if cursor.rowcount == 0:
+                    cursor.execute('SELECT id, domain_number FROM domains WHERE domain_name = ?', (domain_name,))
+                    existing = cursor.fetchone()
+                    if existing:
+                        return existing[1]
                 
                 return domain_number
     

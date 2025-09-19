@@ -1745,21 +1745,20 @@ def background_sync_with_rate_limiting():
             try:
                 print(f"Processing {i}/{sync_progress['total']}: {domain_name}")
                 
-                # Add domain with preserved number or new number
-                if domain_name in domain_numbers:
-                    # Update the domain with preserved number
-                    with db.get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            INSERT INTO domains (domain_number, domain_name, client_id)
-                            VALUES (?, ?, (SELECT id FROM clients WHERE client_name = 'Unassigned'))
-                        ''', (domain_numbers[domain_name], domain_name))
-                        conn.commit()
-                    sync_progress["domains_updated"] += 1
-                else:
-                    # New domain gets new number
-                    db.add_or_update_domain(domain_name)
-                    sync_progress["domains_added"] += 1
+                # Add domain using the proper function
+                try:
+                    if domain_name in domain_numbers:
+                        # Update existing domain (it should already exist, just update timestamp)
+                        db.add_or_update_domain(domain_name)
+                        sync_progress["domains_updated"] += 1
+                    else:
+                        # New domain gets new number
+                        db.add_or_update_domain(domain_name)
+                        sync_progress["domains_added"] += 1
+                except Exception as domain_error:
+                    print(f"⚠️ Error adding domain {domain_name}: {domain_error}")
+                    # Continue processing even if domain add fails
+                    sync_progress["errors"].append(f"{domain_name}: Database error - {str(domain_error)}")
                 
                 # Get redirections with retry logic for rate limits
                 redirections_fetched = False
@@ -1828,16 +1827,8 @@ def background_sync_with_rate_limiting():
                 sync_progress["errors"].append(f"{domain_name}: {str(e)}")
                 # Still add the domain to database even if redirect fetch failed
                 try:
-                    if domain_name in domain_numbers:
-                        with db.get_connection() as conn:
-                            cursor = conn.cursor()
-                            cursor.execute('''
-                                INSERT INTO domains (domain_number, domain_name, client_id)
-                                VALUES (?, ?, (SELECT id FROM clients WHERE client_name = 'Unassigned'))
-                            ''', (domain_numbers[domain_name], domain_name))
-                            conn.commit()
-                    else:
-                        db.add_or_update_domain(domain_name)
+                    # Use the proper add_or_update function
+                    db.add_or_update_domain(domain_name)
                     db.update_domain_sync_status(domain_name, 'not_synced')
                 except Exception as db_error:
                     print(f"Error adding domain {domain_name} to database: {db_error}")
