@@ -2374,111 +2374,33 @@ def bulk_update():
                 name = update.get('name', '@')
                 target = update.get('target')
                 
-                # SAFETY MODE: Also disable bulk updates
-                SAFETY_MODE = True
-                if SAFETY_MODE:
-                    print(f"🚨 SAFETY MODE: Bulk updates temporarily disabled")
+                # Process bulk update with DNS preservation
+                print(f"🔄 Processing bulk update for {domain_name} -> {target}")
+                success = email_manager.api_client.set_domain_redirection(domain_name, '@', target)
+
+                if success:
                     results.append({
                         "domain_name": domain_name,
-                        "success": False,
-                        "error": "Bulk updates temporarily disabled for safety - system was deleting DNS records",
+                        "success": True,
+                        "message": f"Successfully updated redirect for {domain_name}",
                         "processed": i + 1,
                         "total": len(updates)
                     })
-                    continue
+                else:
+                    results.append({
+                        "domain_name": domain_name,
+                        "success": False,
+                        "error": "Failed to update redirect",
+                        "processed": i + 1,
+                        "total": len(updates)
+                    })
 
-                # Update via Namecheap API with retry logic
-                success = False
-                verified = False
-                bulk_retry = 0
-                max_bulk_retries = 5
-
-                while bulk_retry < max_bulk_retries and not success:
-                    try:
-                        success = email_manager.api_client.set_domain_redirection(domain_name, name, target)
-
-                        if success:
-                            # Verify the redirection was actually set correctly
-                            import time
-                            time.sleep(2)  # Small delay to allow Namecheap to process
-                            verified = email_manager.api_client.verify_domain_redirection(domain_name, name, target)
-
-                            if verified:
-                                # Ensure domain exists in database
-                                db.add_or_update_domain(domain_name)
-
-                                db.update_domain_sync_status(domain_name, 'synced')
-
-                                # Fetch and store the actual redirections from Namecheap to database
-                                try:
-                                    redirections = email_manager.api_client.get_domain_redirections(domain_name)
-                                    if redirections:
-                                        db.update_redirections(domain_name, redirections)
-                                        print(f"✅ Bulk: Updated database with {len(redirections)} redirections for {domain_name}")
-                                except Exception as e:
-                                    print(f"⚠️ Bulk: Warning: Could not fetch redirections for {domain_name}: {e}")
-                                break  # Success, exit retry loop
-                            else:
-                                db.update_domain_sync_status(domain_name, 'not_synced')
-                        else:
-                            # If not successful, this might be rate limiting
-                            raise Exception("Failed to set domain redirection")
-
-                    except Exception as bulk_error:
-                        bulk_retry += 1
-                        error_msg = str(bulk_error)
-
-                        # Check for rate limiting indicators
-                        is_rate_limited = (
-                            "too many requests" in error_msg.lower() or
-                            "rate limit" in error_msg.lower() or
-                            "connection/timeout error" in error_msg.lower() or
-                            "502" in error_msg or "503" in error_msg or "504" in error_msg
-                        )
-
-                        if is_rate_limited and bulk_retry < max_bulk_retries:
-                            # Progressive wait times: 5s, 10s, 20s, 40s, 60s
-                            wait_time = min(5 * (2 ** (bulk_retry - 1)), 60) if bulk_retry > 0 else 5
-                            print(f"  ⏳ Bulk: Rate limited for {domain_name}, waiting {wait_time}s (attempt {bulk_retry}/{max_bulk_retries})")
-                            time.sleep(wait_time)
-                        elif bulk_retry >= max_bulk_retries:
-                            print(f"  ❌ Bulk: Max retries reached for {domain_name}")
-                            db.update_domain_sync_status(domain_name, 'not_synced')
-                            break
-                        else:
-                            # Non-rate-limit error, don't retry
-                            print(f"  ⚠️ Bulk: Error for {domain_name}: {bulk_error}")
-                            db.update_domain_sync_status(domain_name, 'not_synced')
-                            break
-
-                results.append({
-                    "domain_name": domain_name,
-                    "success": success,
-                    "verified": verified,
-                    "processed": i + 1,
-                    "total": len(updates)
-                })
-                
-                # Add delay between updates using same rate limiting as main sync
-                if i < len(updates) - 1:
-                    import time
-                    time.sleep(1.5)  # Use same 1.5s delay as main sync
-                
-            except Exception as e:
-                results.append({
-                    "domain_name": update.get('domain_name', 'unknown'),
-                    "success": False,
-                    "error": str(e),
-                    "processed": i + 1,
-                    "total": len(updates)
-                })
-        
         return jsonify({
             "status": "success",
             "results": results,
             "total_processed": len(results)
         })
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3001,22 +2923,7 @@ def update_redirect_form():
                 return jsonify({"error": "Domain and target are required"}), 400
             return "Domain and target are required", 400
 
-        # SAFETY MODE: Temporarily disable redirect updates to prevent DNS deletion
-        # TODO: Remove this once DNS preservation is verified working
-        SAFETY_MODE = True
-
-        if SAFETY_MODE:
-            print(f"🚨 SAFETY MODE: Redirect updates temporarily disabled")
-            print(f"🚨 This prevents accidental deletion of other DNS records")
-            if request.is_json or request.headers.get('Content-Type') == 'application/json':
-                return jsonify({
-                    "status": "error",
-                    "error": "Redirect updates temporarily disabled for safety. The system was deleting other DNS records. Please contact administrator."
-                }), 503
-            else:
-                return "Redirect updates temporarily disabled for safety", 503
-
-        # Update via Namecheap API with retry logic
+        # Update via Namecheap API with DNS preservation and retry logic
         success = False
         save_retry = 0
         max_save_retries = 5

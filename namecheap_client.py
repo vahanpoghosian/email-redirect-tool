@@ -567,12 +567,133 @@ class NamecheapAPIClient:
             return False
 
     def set_domain_redirection(self, domain: str, name: str, target: str) -> bool:
-        """Set domain URL redirection for a domain - CURRENTLY DISABLED FOR SAFETY"""
-        print(f"🚨 REDIRECT UPDATE BLOCKED - Safety mode active")
-        print(f"🚨 Domain: {domain}, Name: {name}, Target: {target}")
+        """Set domain URL redirection with DNS preservation"""
+        try:
+            print(f"🔄 Setting URL redirection for {domain}: {name} -> {target}")
 
-        # Run safe analysis instead
-        return self.set_domain_redirection_safe(domain, name, target)
+            # Get all existing DNS records
+            existing_hosts = self._get_all_hosts(domain)
+            print(f"📋 Found {len(existing_hosts)} existing DNS records")
+
+            # Separate URL redirects from other DNS records
+            non_url_records = []
+            url_redirects = []
+
+            for host in existing_hosts:
+                if host.get('Type') == 'URL':
+                    url_redirects.append(host)
+                else:
+                    non_url_records.append(host)
+
+            print(f"📊 Preserving {len(non_url_records)} non-URL DNS records")
+            print(f"📊 Found {len(url_redirects)} existing URL redirects")
+
+            # Build new host list: preserve all non-URL + update URL redirects
+            hosts_to_set = []
+
+            # Add all non-URL records (preserve them)
+            for host in non_url_records:
+                hosts_to_set.append({
+                    'Name': host.get('Name', '@'),
+                    'Type': host.get('Type', 'A'),
+                    'Address': host.get('Address', ''),
+                    'TTL': host.get('TTL', '1800'),
+                    'MXPref': host.get('MXPref', '')
+                })
+
+            # Add/update the specific URL redirect
+            redirect_updated = False
+            for host in url_redirects:
+                if host.get('Name') == name:
+                    # Update existing redirect
+                    hosts_to_set.append({
+                        'Name': name,
+                        'Type': 'URL',
+                        'Address': target,
+                        'TTL': '300'
+                    })
+                    redirect_updated = True
+                    print(f"🔄 Updated existing redirect: {name}")
+                else:
+                    # Keep other URL redirects
+                    hosts_to_set.append({
+                        'Name': host.get('Name'),
+                        'Type': 'URL',
+                        'Address': host.get('Address'),
+                        'TTL': host.get('TTL', '300')
+                    })
+
+            # If redirect didn't exist, add it
+            if not redirect_updated:
+                hosts_to_set.append({
+                    'Name': name,
+                    'Type': 'URL',
+                    'Address': target,
+                    'TTL': '300'
+                })
+                print(f"➕ Added new redirect: {name}")
+
+            print(f"📦 Total records to set: {len(hosts_to_set)}")
+
+            # Split domain for Namecheap API
+            domain_parts = domain.split('.')
+            if len(domain_parts) < 2:
+                print(f"❌ Invalid domain format: {domain}")
+                return False
+
+            sld = domain_parts[0]
+            tld = '.'.join(domain_parts[1:])
+
+            # Handle common multi-part TLDs
+            common_tlds = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au']
+            for common_tld in common_tlds:
+                if domain.endswith('.' + common_tld):
+                    sld = domain.replace('.' + common_tld, '')
+                    tld = common_tld
+                    break
+
+            # Build setHosts parameters
+            params = {'SLD': sld, 'TLD': tld}
+
+            for i, host in enumerate(hosts_to_set, 1):
+                params[f'HostName{i}'] = host['Name']
+                params[f'RecordType{i}'] = host['Type']
+                params[f'Address{i}'] = host['Address']
+                params[f'TTL{i}'] = host['TTL']
+                if host.get('MXPref'):
+                    params[f'MXPref{i}'] = host['MXPref']
+
+            # Make API call
+            response = self._make_request('namecheap.domains.dns.setHosts', **params)
+
+            # Check response
+            command_response = None
+            for key, value in response.items():
+                if 'CommandResponse' in key:
+                    command_response = value
+                    break
+
+            if command_response:
+                hosts_result = None
+                for key, value in command_response.items():
+                    if 'DomainDNSSetHostsResult' in key:
+                        hosts_result = value
+                        break
+
+                if hosts_result and hosts_result.get('IsSuccess') == 'true':
+                    print(f"✅ Successfully updated URL redirection for {domain}")
+                    print(f"✅ Preserved {len(non_url_records)} other DNS records")
+                    return True
+                else:
+                    print(f"❌ API returned failure: {hosts_result}")
+                    return False
+
+            print(f"❌ Unexpected response format")
+            return False
+
+        except Exception as e:
+            print(f"❌ Error setting domain redirection: {e}")
+            return False
 
     def verify_domain_redirection(self, domain: str, name: str, expected_target: str) -> bool:
         """Verify that domain redirection was actually set correctly"""
