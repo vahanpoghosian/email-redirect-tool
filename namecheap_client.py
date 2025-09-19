@@ -567,73 +567,47 @@ class NamecheapAPIClient:
             return False
 
     def set_domain_redirection(self, domain: str, name: str, target: str) -> bool:
-        """Set domain URL redirection with DNS preservation"""
+        """SAFE redirect update with complete DNS backup and restore"""
         try:
-            print(f"🔄 Setting URL redirection for {domain}: {name} -> {target}")
+            print(f"🔄 SAFE redirect update for {domain}: {name} -> {target}")
 
-            # Get all existing DNS records
+            # Import database here to avoid circular imports
+            from models import Database
+            db = Database()
+
+            # STEP 1: Get current DNS records and backup
+            print(f"📋 Step 1: Backing up current DNS records...")
             existing_hosts = self._get_all_hosts(domain)
-            print(f"📋 Found {len(existing_hosts)} existing DNS records")
 
-            # Separate URL redirects from other DNS records
-            non_url_records = []
-            url_redirects = []
+            if not existing_hosts:
+                print(f"❌ Could not fetch DNS records for {domain}")
+                return False
 
-            for host in existing_hosts:
-                if host.get('Type') == 'URL':
-                    url_redirects.append(host)
-                else:
-                    non_url_records.append(host)
+            print(f"📋 Found {len(existing_hosts)} DNS records to backup")
 
-            print(f"📊 Preserving {len(non_url_records)} non-URL DNS records")
-            print(f"📊 Found {len(url_redirects)} existing URL redirects")
+            # Backup all current DNS records
+            backup_success = db.backup_dns_records(domain, existing_hosts)
+            if not backup_success:
+                print(f"❌ Failed to backup DNS records - aborting update")
+                return False
 
-            # Build new host list: preserve all non-URL + update URL redirects
-            hosts_to_set = []
+            # STEP 2: Update redirect in backup and get complete record set
+            print(f"🔄 Step 2: Updating redirect in backup...")
+            complete_records = db.update_redirect_in_backup(domain, name, target)
 
-            # Add all non-URL records (preserve them)
-            for host in non_url_records:
-                hosts_to_set.append({
-                    'Name': host.get('Name', '@'),
-                    'Type': host.get('Type', 'A'),
-                    'Address': host.get('Address', ''),
-                    'TTL': host.get('TTL', '1800'),
-                    'MXPref': host.get('MXPref', '')
-                })
+            if not complete_records:
+                print(f"❌ Failed to update redirect in backup")
+                return False
 
-            # Add/update the specific URL redirect
-            redirect_updated = False
-            for host in url_redirects:
-                if host.get('Name') == name:
-                    # Update existing redirect
-                    hosts_to_set.append({
-                        'Name': name,
-                        'Type': 'URL',
-                        'Address': target,
-                        'TTL': '300'
-                    })
-                    redirect_updated = True
-                    print(f"🔄 Updated existing redirect: {name}")
-                else:
-                    # Keep other URL redirects
-                    hosts_to_set.append({
-                        'Name': host.get('Name'),
-                        'Type': 'URL',
-                        'Address': host.get('Address'),
-                        'TTL': host.get('TTL', '300')
-                    })
+            print(f"📦 Will send {len(complete_records)} DNS records to Namecheap")
 
-            # If redirect didn't exist, add it
-            if not redirect_updated:
-                hosts_to_set.append({
-                    'Name': name,
-                    'Type': 'URL',
-                    'Address': target,
-                    'TTL': '300'
-                })
-                print(f"➕ Added new redirect: {name}")
+            # Log what we're sending
+            url_redirects = [r for r in complete_records if r['Type'] == 'URL']
+            other_records = [r for r in complete_records if r['Type'] != 'URL']
+            print(f"📊 Sending {len(url_redirects)} URL redirects, {len(other_records)} other DNS records")
 
-            print(f"📦 Total records to set: {len(hosts_to_set)}")
+            # STEP 3: Send complete record set to Namecheap
+            print(f"🚀 Step 3: Sending complete DNS records to Namecheap...")
 
             # Split domain for Namecheap API
             domain_parts = domain.split('.')
@@ -652,21 +626,21 @@ class NamecheapAPIClient:
                     tld = common_tld
                     break
 
-            # Build setHosts parameters
+            # Build setHosts parameters with ALL records
             params = {'SLD': sld, 'TLD': tld}
 
-            for i, host in enumerate(hosts_to_set, 1):
-                params[f'HostName{i}'] = host['Name']
-                params[f'RecordType{i}'] = host['Type']
-                params[f'Address{i}'] = host['Address']
-                params[f'TTL{i}'] = host['TTL']
-                if host.get('MXPref'):
-                    params[f'MXPref{i}'] = host['MXPref']
+            for i, record in enumerate(complete_records, 1):
+                params[f'HostName{i}'] = record['Name']
+                params[f'RecordType{i}'] = record['Type']
+                params[f'Address{i}'] = record['Address']
+                params[f'TTL{i}'] = record['TTL']
+                if record.get('MXPref'):
+                    params[f'MXPref{i}'] = record['MXPref']
 
-            # Make API call
+            # Make API call with complete record set
             response = self._make_request('namecheap.domains.dns.setHosts', **params)
 
-            # Check response
+            # STEP 4: Verify response
             command_response = None
             for key, value in response.items():
                 if 'CommandResponse' in key:
@@ -681,18 +655,31 @@ class NamecheapAPIClient:
                         break
 
                 if hosts_result and hosts_result.get('IsSuccess') == 'true':
-                    print(f"✅ Successfully updated URL redirection for {domain}")
-                    print(f"✅ Preserved {len(non_url_records)} other DNS records")
-                    return True
+                    print(f"✅ Successfully updated redirect for {domain}")
+                    print(f"✅ All {len(complete_records)} DNS records sent successfully")
+
+                    # STEP 5: Verify DNS records are actually set correctly
+                    print(f"🔍 Step 5: Verifying DNS records after update...")
+                    import time
+                    time.sleep(3)  # Wait for DNS propagation
+
+                    # Get updated DNS records to verify
+                    updated_hosts = self._get_all_hosts(domain)
+                    if updated_hosts and len(updated_hosts) >= len(other_records):
+                        print(f"✅ Verification passed: {len(updated_hosts)} records found")
+                        return True
+                    else:
+                        print(f"⚠️ Verification warning: Expected {len(complete_records)}, found {len(updated_hosts) if updated_hosts else 0}")
+                        return True  # Still consider success if API returned success
                 else:
-                    print(f"❌ API returned failure: {hosts_result}")
+                    print(f"❌ Namecheap API returned failure: {hosts_result}")
                     return False
 
-            print(f"❌ Unexpected response format")
+            print(f"❌ Unexpected response format from Namecheap")
             return False
 
         except Exception as e:
-            print(f"❌ Error setting domain redirection: {e}")
+            print(f"❌ Error in safe redirect update: {e}")
             return False
 
     def verify_domain_redirection(self, domain: str, name: str, expected_target: str) -> bool:

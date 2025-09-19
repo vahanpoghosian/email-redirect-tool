@@ -92,11 +92,28 @@ class Database:
             # Create default user
             self._create_default_user(cursor)
             
+            # DNS records table for complete DNS backup and restore
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS dns_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    domain_name TEXT NOT NULL,
+                    record_name TEXT NOT NULL,
+                    record_type TEXT NOT NULL,
+                    record_address TEXT NOT NULL,
+                    ttl TEXT,
+                    mx_pref TEXT,
+                    backup_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_current BOOLEAN DEFAULT TRUE,
+                    is_url_redirect BOOLEAN DEFAULT FALSE,
+                    UNIQUE(domain_name, record_name, record_type, is_current)
+                )
+            ''')
+
             # Create default "Unassigned" client
             cursor.execute('''
                 INSERT OR IGNORE INTO clients (client_name) VALUES ('Unassigned')
             ''')
-            
+
             conn.commit()
     
     def _create_default_user(self, cursor):
@@ -341,3 +358,153 @@ class Database:
                 UPDATE domains SET sync_status = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE domain_name = ?
             ''', (status, domain_name))
+
+    # DNS Backup and Restore Methods
+    def backup_dns_records(self, domain_name: str, dns_records: List[Dict]) -> bool:
+        """
+        Backup complete DNS records for a domain before making changes
+
+        Args:
+            domain_name: The domain to backup
+            dns_records: List of DNS records from Namecheap API
+
+        Returns:
+            bool: True if backup successful
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Mark previous records as not current
+                cursor.execute('''
+                    UPDATE dns_records SET is_current = FALSE
+                    WHERE domain_name = ? AND is_current = TRUE
+                ''', (domain_name,))
+
+                # Insert current DNS records
+                for record in dns_records:
+                    is_url_redirect = record.get('Type', '').upper() == 'URL'
+
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO dns_records
+                        (domain_name, record_name, record_type, record_address, ttl, mx_pref, is_url_redirect, is_current)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+                    ''', (
+                        domain_name,
+                        record.get('Name', '@'),
+                        record.get('Type', ''),
+                        record.get('Address', ''),
+                        record.get('TTL', ''),
+                        record.get('MXPref', ''),
+                        is_url_redirect
+                    ))
+
+                conn.commit()
+                print(f"✅ Backed up {len(dns_records)} DNS records for {domain_name}")
+                return True
+
+        except Exception as e:
+            print(f"❌ Failed to backup DNS records for {domain_name}: {e}")
+            return False
+
+    def get_current_dns_records(self, domain_name: str) -> List[Dict]:
+        """
+        Get current DNS records for a domain from backup
+
+        Args:
+            domain_name: The domain to get records for
+
+        Returns:
+            List[Dict]: Current DNS records in Namecheap API format
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT record_name, record_type, record_address, ttl, mx_pref, is_url_redirect
+                FROM dns_records
+                WHERE domain_name = ? AND is_current = TRUE
+                ORDER BY record_type, record_name
+            ''', (domain_name,))
+
+            records = []
+            for row in cursor.fetchall():
+                record = {
+                    'Name': row[0],
+                    'Type': row[1],
+                    'Address': row[2],
+                    'TTL': row[3] or '1800'
+                }
+
+                # Add MXPref for MX records
+                if row[1].upper() == 'MX' and row[4]:
+                    record['MXPref'] = row[4]
+
+                records.append(record)
+
+            return records
+
+    def update_redirect_in_backup(self, domain_name: str, redirect_name: str, new_target: str) -> List[Dict]:
+        """
+        Update a URL redirect in the DNS backup and return complete record set
+
+        Args:
+            domain_name: The domain to update
+            redirect_name: The redirect name (e.g., '@', 'www')
+            new_target: The new redirect target URL
+
+        Returns:
+            List[Dict]: Complete DNS records with updated redirect
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Update the redirect record in backup
+            cursor.execute('''
+                UPDATE dns_records
+                SET record_address = ?, backup_timestamp = CURRENT_TIMESTAMP
+                WHERE domain_name = ? AND record_name = ? AND record_type = 'URL' AND is_current = TRUE
+            ''', (new_target, domain_name, redirect_name))
+
+            # If no records were updated, insert new redirect
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    INSERT INTO dns_records
+                    (domain_name, record_name, record_type, record_address, ttl, is_url_redirect, is_current)
+                    VALUES (?, ?, 'URL', ?, '300', TRUE, TRUE)
+                ''', (domain_name, redirect_name, new_target))
+
+            conn.commit()
+
+        # Return complete updated record set
+        return self.get_current_dns_records(domain_name)
+
+    def get_dns_backup_history(self, domain_name: str, limit: int = 10) -> List[Dict]:
+        """
+        Get DNS backup history for a domain
+
+        Args:
+            domain_name: The domain to get history for
+            limit: Maximum number of backups to return
+
+        Returns:
+            List[Dict]: DNS backup history
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT backup_timestamp, COUNT(*) as record_count
+                FROM dns_records
+                WHERE domain_name = ?
+                GROUP BY backup_timestamp
+                ORDER BY backup_timestamp DESC
+                LIMIT ?
+            ''', (domain_name, limit))
+
+            history = []
+            for row in cursor.fetchall():
+                history.append({
+                    'timestamp': row[0],
+                    'record_count': row[1]
+                })
+
+            return history

@@ -2374,16 +2374,26 @@ def bulk_update():
                 name = update.get('name', '@')
                 target = update.get('target')
                 
-                # EMERGENCY SAFETY MODE: Block bulk updates too
-                print(f"🚨 EMERGENCY: Bulk update blocked for {domain_name}")
-                results.append({
-                    "domain_name": domain_name,
-                    "success": False,
-                    "error": "EMERGENCY: Bulk updates disabled - DNS preservation failed",
-                    "processed": i + 1,
-                    "total": len(updates)
-                })
-                continue
+                # Use SAFE redirect update with DNS backup/restore
+                print(f"🔄 Safe bulk update for {domain_name} -> {target}")
+                success = email_manager.api_client.set_domain_redirection(domain_name, '@', target)
+
+                if success:
+                    results.append({
+                        "domain_name": domain_name,
+                        "success": True,
+                        "message": f"Successfully updated redirect for {domain_name}",
+                        "processed": i + 1,
+                        "total": len(updates)
+                    })
+                else:
+                    results.append({
+                        "domain_name": domain_name,
+                        "success": False,
+                        "error": "Failed to update redirect",
+                        "processed": i + 1,
+                        "total": len(updates)
+                    })
 
             except Exception as update_error:
                 results.append({
@@ -2922,20 +2932,7 @@ def update_redirect_form():
                 return jsonify({"error": "Domain and target are required"}), 400
             return "Domain and target are required", 400
 
-        # EMERGENCY SAFETY MODE: DNS preservation failed - blocking all updates
-        SAFETY_MODE = True
-        if SAFETY_MODE:
-            print(f"🚨 EMERGENCY SAFETY MODE: DNS preservation failed!")
-            print(f"🚨 User reported: System deleted all DNS records again")
-            if request.is_json or request.headers.get('Content-Type') == 'application/json':
-                return jsonify({
-                    "status": "error",
-                    "error": "EMERGENCY: Redirect updates disabled - DNS preservation failed. Contact administrator immediately."
-                }), 503
-            else:
-                return "EMERGENCY: Redirect updates disabled - DNS preservation failed", 503
-
-        # Update via Namecheap API with DNS preservation and retry logic
+        # Use new SAFE redirect update with complete DNS backup/restore system
         success = False
         save_retry = 0
         max_save_retries = 5
@@ -3153,6 +3150,39 @@ def add_client_form():
         return f"Error adding client: {str(e)}", 500
 
 # Catch-all route for React Router (must be last)
+@app.route('/api/dns-backup-history/<domain_name>', methods=['GET'])
+def get_dns_backup_history(domain_name):
+    """Get DNS backup history for a specific domain"""
+    try:
+        history = db.get_dns_backup_history(domain_name)
+        return jsonify({
+            "status": "success",
+            "domain": domain_name,
+            "backups": history
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
+@app.route('/api/dns-records/<domain_name>', methods=['GET'])
+def get_dns_records_backup(domain_name):
+    """Get current DNS records from backup for a specific domain"""
+    try:
+        records = db.get_current_dns_records(domain_name)
+        return jsonify({
+            "status": "success",
+            "domain": domain_name,
+            "records": records,
+            "total_records": len(records)
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
 @app.route('/<path:path>')
 def catch_all(path):
     """Serve React app for any unmatched routes (client-side routing)"""
