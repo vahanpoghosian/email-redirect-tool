@@ -728,40 +728,53 @@ class NamecheapAPIClient:
                 TLD=tld
             )
 
-            print(f"🔍 DEBUG: Full API response structure:")
             print(f"🔍 DEBUG: Response keys: {list(response.keys())}")
-            print(f"🔍 DEBUG: Full response: {response}")
 
             hosts = []
-            
+
             # Find CommandResponse (may be namespaced)
             command_response = None
             for key, value in response.items():
                 if 'CommandResponse' in key:
                     command_response = value
+                    print(f"🔍 DEBUG: Found CommandResponse in key: {key}")
                     break
-            
+
             if not command_response:
+                print(f"❌ DEBUG: No CommandResponse found in response keys: {list(response.keys())}")
                 return []
-            
+
+            print(f"🔍 DEBUG: CommandResponse keys: {list(command_response.keys())}")
+
             # Find DomainDNSGetHostsResult
             hosts_result = None
             for key, value in command_response.items():
                 if 'DomainDNSGetHostsResult' in key:
                     hosts_result = value
+                    print(f"🔍 DEBUG: Found DomainDNSGetHostsResult in key: {key}")
                     break
-            
+
             if not hosts_result:
+                print(f"❌ DEBUG: No DomainDNSGetHostsResult found in CommandResponse keys: {list(command_response.keys())}")
                 return []
-            
+
+            print(f"🔍 DEBUG: DomainDNSGetHostsResult keys: {list(hosts_result.keys())}")
+            print(f"🔍 DEBUG: DomainDNSGetHostsResult content: {hosts_result}")
+
             # Find Host data (may be namespaced or direct)
             host_data = None
             for key, value in hosts_result.items():
-                if 'Host' in key or key == 'Host':
+                if 'Host' in key:
                     host_data = value
+                    print(f"🔍 DEBUG: Found Host data in key: {key}")
                     break
-            
+
             if not host_data:
+                print(f"❌ DEBUG: No Host data found in DomainDNSGetHostsResult keys: {list(hosts_result.keys())}")
+                # Check if there's an error in the response
+                for key, value in hosts_result.items():
+                    if 'error' in key.lower() or 'Error' in key:
+                        print(f"❌ DEBUG: API Error found: {key} = {value}")
                 return []
             
             # Handle single host or list of hosts
