@@ -2374,26 +2374,16 @@ def bulk_update():
                 name = update.get('name', '@')
                 target = update.get('target')
                 
-                # Process bulk update with DNS preservation
-                print(f"🔄 Processing bulk update for {domain_name} -> {target}")
-                success = email_manager.api_client.set_domain_redirection(domain_name, '@', target)
-
-                if success:
-                    results.append({
-                        "domain_name": domain_name,
-                        "success": True,
-                        "message": f"Successfully updated redirect for {domain_name}",
-                        "processed": i + 1,
-                        "total": len(updates)
-                    })
-                else:
-                    results.append({
-                        "domain_name": domain_name,
-                        "success": False,
-                        "error": "Failed to update redirect",
-                        "processed": i + 1,
-                        "total": len(updates)
-                    })
+                # EMERGENCY SAFETY MODE: Block bulk updates too
+                print(f"🚨 EMERGENCY: Bulk update blocked for {domain_name}")
+                results.append({
+                    "domain_name": domain_name,
+                    "success": False,
+                    "error": "EMERGENCY: Bulk updates disabled - DNS preservation failed",
+                    "processed": i + 1,
+                    "total": len(updates)
+                })
+                continue
 
             except Exception as update_error:
                 results.append({
@@ -2931,6 +2921,19 @@ def update_redirect_form():
             if request.is_json or request.headers.get('Content-Type') == 'application/json':
                 return jsonify({"error": "Domain and target are required"}), 400
             return "Domain and target are required", 400
+
+        # EMERGENCY SAFETY MODE: DNS preservation failed - blocking all updates
+        SAFETY_MODE = True
+        if SAFETY_MODE:
+            print(f"🚨 EMERGENCY SAFETY MODE: DNS preservation failed!")
+            print(f"🚨 User reported: System deleted all DNS records again")
+            if request.is_json or request.headers.get('Content-Type') == 'application/json':
+                return jsonify({
+                    "status": "error",
+                    "error": "EMERGENCY: Redirect updates disabled - DNS preservation failed. Contact administrator immediately."
+                }), 503
+            else:
+                return "EMERGENCY: Redirect updates disabled - DNS preservation failed", 503
 
         # Update via Namecheap API with DNS preservation and retry logic
         success = False
