@@ -288,7 +288,7 @@ DASHBOARD_TEMPLATE = """
             
             // Client dropdown
             const clientCell = row.insertCell(4);
-            clientCell.innerHTML = '<select class="form-control" onchange="updateDomainClient(this, \'' + domain.domain_name + '\')" id="client-' + domain.domain_name.replace(/\./g, '-') + '"><option value="">Unassigned</option></select>';
+            clientCell.innerHTML = '<select class="form-control" onchange="updateDomainClient(this, \'' + domain.domain_name + '\')" id="client-' + domain.domain_name.replace(/\\./g, '-') + '"><option value="">Unassigned</option></select>';
             
             // Load clients into dropdown
             loadClientsIntoDropdown(domain.domain_name, domain.client_id);
