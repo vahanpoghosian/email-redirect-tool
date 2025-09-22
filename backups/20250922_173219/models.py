@@ -14,19 +14,8 @@ class Database:
             self.db_path = db_path
         else:
             import os
-            # Try different paths for persistent storage
-            # 1. Render persistent disk (if mounted)
-            if os.path.exists('/opt/render/project/data'):
-                self.db_path = '/opt/render/project/data/redirect_tool.db'
-                print(f"Using Render persistent disk at: {self.db_path}")
-            # 2. Environment variable
-            elif os.environ.get('DATABASE_PATH'):
-                self.db_path = os.environ.get('DATABASE_PATH')
-                print(f"Using environment variable path: {self.db_path}")
-            # 3. Default local path
-            else:
-                self.db_path = 'redirect_tool.db'
-                print(f"Using default local path: {self.db_path}")
+            # Use environment variable if available (for production)
+            self.db_path = os.environ.get('DATABASE_PATH', 'redirect_tool.db')
 
         print(f"Using database at: {self.db_path}")
         self.init_database()

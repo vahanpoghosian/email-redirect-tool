@@ -1936,9 +1936,9 @@ def get_sync_errors():
         "last_sync_status": sync_progress["status"]
     })
 
-@app.route('/api/backup-database', methods=['GET', 'POST'])
+@app.route('/api/backup-database', methods=['POST'])
 def backup_database():
-    """Create a comprehensive backup of all database data"""
+    """Create a backup of current database state"""
     try:
         import json
         from datetime import datetime
@@ -1947,53 +1947,24 @@ def backup_database():
         domains = db.get_all_domains_with_redirections()
         clients = db.get_all_clients()
 
-        # Get DNS records for all domains
-        dns_records = {}
-        for domain in domains:
-            domain_name = domain.get('domain_name')
-            if domain_name:
-                records = db.get_current_dns_records(domain_name)
-                if records:
-                    dns_records[domain_name] = records
-
         backup_data = {
             "timestamp": datetime.now().isoformat(),
-            "version": "3.0",
             "domains": domains,
-            "clients": clients,
-            "dns_records": dns_records,
-            "database_path": db.db_path
+            "clients": clients
         }
 
-        if request.method == 'GET':
-            # Return as downloadable file
-            response = make_response(json.dumps(backup_data, indent=2))
-            response.headers['Content-Type'] = 'application/json'
-            response.headers['Content-Disposition'] = f'attachment; filename=redirect_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-            return response
-        else:
-            # Save to file and return status
-            backup_filename = f"db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save to a backup file (this would ideally be sent to external storage)
+        backup_filename = f"db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(backup_filename, 'w') as f:
+            json.dump(backup_data, f, indent=2)
 
-            # Try to save in persistent location
-            import os
-            if os.path.exists('/opt/render/project/data'):
-                backup_path = f'/opt/render/project/data/{backup_filename}'
-            else:
-                backup_path = backup_filename
-
-            with open(backup_path, 'w') as f:
-                json.dump(backup_data, f, indent=2)
-
-            return jsonify({
-                "status": "success",
-                "message": f"Database backed up successfully",
-                "backup_file": backup_path,
-                "domains_count": len(domains),
-                "clients_count": len(clients),
-                "dns_records_count": len(dns_records),
-                "backup_data": backup_data
-            })
+        return jsonify({
+            "status": "success",
+            "message": f"Database backed up to {backup_filename}",
+            "backup_file": backup_filename,
+            "domains_count": len(domains),
+            "clients_count": len(clients)
+        })
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -2102,23 +2073,11 @@ def restore_database():
             except Exception as e:
                 print(f"Warning: Could not restore domain {domain.get('domain_name')}: {e}")
 
-        # Restore DNS records if available
-        dns_records = backup_data.get('dns_records', {})
-        dns_restored = 0
-        for domain_name, records in dns_records.items():
-            try:
-                if records:
-                    db.backup_dns_records(domain_name, records)
-                    dns_restored += 1
-            except Exception as e:
-                print(f"Warning: Could not restore DNS records for {domain_name}: {e}")
-
         return jsonify({
             "status": "success",
             "message": "Database restored successfully",
             "restored_domains": len(domains),
-            "restored_clients": len(clients),
-            "restored_dns_records": dns_restored
+            "restored_clients": len(clients)
         })
 
     except Exception as e:
