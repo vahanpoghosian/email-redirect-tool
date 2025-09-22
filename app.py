@@ -1510,6 +1510,39 @@ CLIENTS_TEMPLATE = """
 
 # Initialize database and email redirection manager
 db = Database()
+
+# Log database location for verification
+print(f"📁 Database initialized at: {db.db_path}")
+if '/opt/render/project/data' in db.db_path:
+    print("✅ Using Render persistent disk - data will survive deployments")
+    # Create automatic backup on startup
+    try:
+        import os
+        import json
+        from datetime import datetime
+        backup_dir = '/opt/render/project/data/backups'
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Check if we should create a startup backup
+        startup_backup_file = f'{backup_dir}/startup_{datetime.now().strftime("%Y%m%d")}.json'
+        if not os.path.exists(startup_backup_file):
+            domains = db.get_all_domains_with_redirections()
+            clients = db.get_all_clients()
+            backup_data = {
+                "timestamp": datetime.now().isoformat(),
+                "type": "startup_backup",
+                "domains": domains,
+                "clients": clients
+            }
+            with open(startup_backup_file, 'w') as f:
+                json.dump(backup_data, f)
+            print(f"📦 Created startup backup: {startup_backup_file}")
+    except Exception as e:
+        print(f"⚠️  Could not create startup backup: {e}")
+else:
+    print("⚠️  Using local storage - data may be lost on deployment")
+    print("💡 Upgrade to Render paid tier for persistent storage")
+
 email_manager = None
 
 try:
@@ -2873,12 +2906,33 @@ def debug_api():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
-        "service": "email-redirect-tool",
-        "timestamp": datetime.now().isoformat()
-    })
+    """Health check endpoint with database status"""
+    try:
+        # Check database status
+        domain_count = len(db.get_all_domains())
+        client_count = len(db.get_all_clients())
+
+        # Check if using persistent storage
+        using_persistent = '/opt/render/project/data' in db.db_path
+
+        return jsonify({
+            "status": "healthy",
+            "service": "email-redirect-tool",
+            "timestamp": datetime.now().isoformat(),
+            "database": {
+                "path": db.db_path,
+                "persistent": using_persistent,
+                "domains": domain_count,
+                "clients": client_count
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "unhealthy",
+            "service": "email-redirect-tool",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }), 500
 
 @app.route('/api/debug-db', methods=['GET'])
 def debug_database():

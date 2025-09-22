@@ -9,6 +9,8 @@ services:
       mountPath: /opt/render/project/data
       sizeGB: 1
     envVars:
+      - key: DATABASE_PATH
+        value: /opt/render/project/data/redirect_tool.db
       - key: NAMECHEAP_API_USER
         value: YOUR_NAMECHEAP_USERNAME
       - key: NAMECHEAP_API_KEY
