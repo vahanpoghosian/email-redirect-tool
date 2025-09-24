@@ -1726,7 +1726,7 @@ def background_sync_with_rate_limiting():
         
         while retry_count < max_retries:
             try:
-                namecheap_domains = get_email_manager().get_all_domains()
+                namecheap_domains = email_manager.get_all_domains()
                 if namecheap_domains:
                     break
                 retry_count += 1
@@ -1784,7 +1784,7 @@ def background_sync_with_rate_limiting():
                 
                 while redirect_retry < max_redirect_retries and not redirections_fetched:
                     try:
-                        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+                        redirections = email_manager.api_client.get_domain_redirections(domain_name)
                         redirections_fetched = True
                         
                         if redirections:
@@ -1875,7 +1875,7 @@ def sync_all_domains():
             return jsonify({"error": "Sync already in progress"}), 409
         
         # Get all domains from Namecheap
-        namecheap_domains = get_email_manager().get_all_domains()
+        namecheap_domains = email_manager.get_all_domains()
         
         if not namecheap_domains:
             return jsonify({"error": "No domains found in Namecheap"}), 404
@@ -2025,7 +2025,7 @@ def debug_dns_records(domain_name):
         print(f"🔍 DEBUGGING DNS for domain: {domain_name}")
 
         # Get all DNS records
-        dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
+        dns_records = email_manager.api_client._get_all_hosts(domain_name)
 
         print(f"📋 Retrieved {len(dns_records)} DNS records")
 
@@ -2204,7 +2204,7 @@ def sync_selected_domains():
                     while retry < max_retries and not synced:
                         try:
                             # Get redirections for this domain
-                            redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+                            redirections = email_manager.api_client.get_domain_redirections(domain_name)
 
                             if redirections is not None:
                                 # Update domain redirections
@@ -2260,7 +2260,7 @@ def sync_single_domain():
         domain_number = db.add_or_update_domain(domain_name)
         
         # Get redirections from Namecheap
-        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+        redirections = email_manager.api_client.get_domain_redirections(domain_name)
         
         # Update redirections in database
         db.update_redirections(domain_name, redirections)
@@ -2434,7 +2434,7 @@ def bulk_update():
                 
                 # Use SAFE redirect update with DNS backup/restore
                 print(f"🔄 Safe bulk update for {domain_name} -> {target}")
-                success = get_email_manager().api_client.set_domain_redirection(domain_name, '@', target)
+                success = email_manager.api_client.set_domain_redirection(domain_name, '@', target)
 
                 if success:
                     results.append({
@@ -2483,20 +2483,20 @@ def get_domains_with_redirections():
             }), 503
         
         # Test API connection first
-        connection_test = get_email_manager().api_client.test_connection()
+        connection_test = email_manager.api_client.test_connection()
         if not connection_test:
             return jsonify({
                 "status": "error",
                 "message": "Namecheap API connection failed. Check credentials and IP whitelist.",
                 "debug_info": {
-                    "api_user": get_email_manager().api_client.api_user,
-                    "client_ip": get_email_manager().api_client.client_ip,
-                    "api_key_present": bool(get_email_manager().api_client.api_key)
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip,
+                    "api_key_present": bool(email_manager.api_client.api_key)
                 }
             }), 503
         
         # Get all domains
-        domains = get_email_manager().get_all_domains()
+        domains = email_manager.get_all_domains()
         
         if not domains:
             return jsonify({
@@ -2504,8 +2504,8 @@ def get_domains_with_redirections():
                 "message": "No domains found in your Namecheap account or API connection issue.",
                 "debug_info": {
                     "connection_test": connection_test,
-                    "api_user": get_email_manager().api_client.api_user,
-                    "client_ip": get_email_manager().api_client.client_ip
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip
                 }
             }), 404
         
@@ -2516,7 +2516,7 @@ def get_domains_with_redirections():
         
         for domain in domains[:max_domains]:
             try:
-                redirections = get_email_manager().api_client.get_domain_redirections(domain)
+                redirections = email_manager.api_client.get_domain_redirections(domain)
                 
                 domains_with_redirections.append({
                     'name': domain,
@@ -2578,7 +2578,7 @@ def update_redirection():
             }), 400
         
         # Update the redirection using Namecheap API
-        success = get_email_manager().api_client.set_domain_redirection(domain, name, target)
+        success = email_manager.api_client.set_domain_redirection(domain, name, target)
         
         if success:
             return jsonify({
@@ -2613,7 +2613,7 @@ def get_domains_batch():
         per_page = int(request.args.get('per_page', 25))  # Increased to 25 domains per batch
         
         # Get all domains
-        domains = get_email_manager().get_all_domains()
+        domains = email_manager.get_all_domains()
         
         if not domains:
             return jsonify({
@@ -2631,7 +2631,7 @@ def get_domains_batch():
         
         for i, domain in enumerate(batch_domains):
             try:
-                redirections = get_email_manager().api_client.get_domain_redirections(domain)
+                redirections = email_manager.api_client.get_domain_redirections(domain)
                 
                 domains_with_redirections.append({
                     'name': domain,
@@ -2687,20 +2687,20 @@ def get_all_redirections():
             }), 503
         
         # Test API connection first
-        connection_test = get_email_manager().api_client.test_connection()
+        connection_test = email_manager.api_client.test_connection()
         if not connection_test:
             return jsonify({
                 "status": "error",
                 "message": "Namecheap API connection failed. Check credentials and IP whitelist.",
                 "debug_info": {
-                    "api_user": get_email_manager().api_client.api_user,
-                    "client_ip": get_email_manager().api_client.client_ip,
-                    "api_key_present": bool(get_email_manager().api_client.api_key)
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip,
+                    "api_key_present": bool(email_manager.api_client.api_key)
                 }
             }), 503
         
         # Get all domains
-        domains = get_email_manager().get_all_domains()
+        domains = email_manager.get_all_domains()
         
         if not domains:
             return jsonify({
@@ -2708,8 +2708,8 @@ def get_all_redirections():
                 "message": "No domains found in your Namecheap account or API connection issue.",
                 "debug_info": {
                     "connection_test": connection_test,
-                    "api_user": get_email_manager().api_client.api_user,
-                    "client_ip": get_email_manager().api_client.client_ip
+                    "api_user": email_manager.api_client.api_user,
+                    "client_ip": email_manager.api_client.client_ip
                 }
             }), 404
         
@@ -2719,7 +2719,7 @@ def get_all_redirections():
         
         for domain in domains:
             try:
-                redirections = get_email_manager().api_client.get_domain_redirections(domain)
+                redirections = email_manager.api_client.get_domain_redirections(domain)
                 
                 for redirect in redirections:
                     all_redirections.append({
@@ -2761,7 +2761,7 @@ def get_domains():
             }), 503
         
         # Get domains from Namecheap
-        domain_names = get_email_manager().get_all_domains()
+        domain_names = email_manager.get_all_domains()
 
         # Get domains with redirections from database
         db_domains = db.get_all_domains_with_redirections()
@@ -2860,20 +2860,20 @@ def debug_api():
             })
         
         # Test connection
-        connection_test = get_email_manager().api_client.test_connection()
+        connection_test = email_manager.api_client.test_connection()
         
         # Try to get domains
-        domains = get_email_manager().get_all_domains()
+        domains = email_manager.get_all_domains()
         
         return jsonify({
             "status": "debug",
             "connection_test": connection_test,
             "actual_outbound_ip": actual_ip,
-            "configured_ip": get_email_manager().api_client.client_ip,
+            "configured_ip": email_manager.api_client.client_ip,
             "api_credentials": {
-                "api_user": get_email_manager().api_client.api_user,
-                "client_ip": get_email_manager().api_client.client_ip,
-                "api_key_length": len(get_email_manager().api_client.api_key) if get_email_manager().api_client.api_key else 0
+                "api_user": email_manager.api_client.api_user,
+                "client_ip": email_manager.api_client.client_ip,
+                "api_key_length": len(email_manager.api_client.api_key) if email_manager.api_client.api_key else 0
             },
             "domains_found": len(domains),
             "sample_domains": domains[:3] if domains else [],
@@ -3018,7 +3018,7 @@ def update_redirect_form():
 
         while save_retry < max_save_retries and not success:
             try:
-                success = get_email_manager().api_client.set_domain_redirection(domain, '@', target)
+                success = email_manager.api_client.set_domain_redirection(domain, '@', target)
                 if success:
                     break  # Success, exit retry loop
                 else:
@@ -3053,7 +3053,7 @@ def update_redirect_form():
             # Verify the redirection was actually set correctly
             import time
             time.sleep(2)  # Small delay to allow Namecheap to process
-            verified = get_email_manager().api_client.verify_domain_redirection(domain, '@', target)
+            verified = email_manager.api_client.verify_domain_redirection(domain, '@', target)
 
             if verified:
                 # Ensure domain exists in database
@@ -3064,7 +3064,7 @@ def update_redirect_form():
 
                 # Fetch and store the actual redirections from Namecheap to database
                 try:
-                    redirections = get_email_manager().api_client.get_domain_redirections(domain)
+                    redirections = email_manager.api_client.get_domain_redirections(domain)
                     if redirections:
                         db.update_redirections(domain, redirections)
                         print(f"✅ Updated database with {len(redirections)} redirections for {domain}")
@@ -3143,14 +3143,14 @@ def bulk_update_form():
         results = []
         for domain in selected_domains:
             try:
-                success = get_email_manager().api_client.set_domain_redirection(domain, '@', bulk_target)
+                success = email_manager.api_client.set_domain_redirection(domain, '@', bulk_target)
 
                 verified = False
                 if success:
                     # Verify the redirection was actually set correctly
                     import time
                     time.sleep(2)  # Small delay to allow Namecheap to process
-                    verified = get_email_manager().api_client.verify_domain_redirection(domain, '@', bulk_target)
+                    verified = email_manager.api_client.verify_domain_redirection(domain, '@', bulk_target)
 
                     # Update sync status based on verification
                     if verified:
