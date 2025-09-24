@@ -1037,7 +1037,7 @@ DASHBOARD_TEMPLATE = """
                 }
 
                 // Auto-fill redirect URL field with client URL
-                const domainSafeId = domainName.replace(/\./g, '-');
+                const domainSafeId = domainName.replace(/\\./g, '-');
                 const selectElement = document.querySelector(`select[onchange*="${domainName}"]`);
 
                 if (selectElement) {
@@ -2892,29 +2892,44 @@ def debug_api():
 def health_check():
     """Health check endpoint with database status"""
     try:
-        # Check database status
-        domain_count = len(db.get_all_domains())
-        client_count = len(db.get_all_clients())
-
-        # Check if using persistent storage
-        using_persistent = '/opt/render/project/data' in db.db_path
-
-        return jsonify({
+        # Simple health check first
+        response = {
             "status": "healthy",
-            "service": "email-redirect-tool",
-            "timestamp": datetime.now().isoformat(),
-            "database": {
+            "service": "email-redirect-tool"
+        }
+
+        # Try to add timestamp
+        try:
+            response["timestamp"] = datetime.now().isoformat()
+        except:
+            import time
+            response["timestamp"] = time.time()
+
+        # Try to add database info
+        try:
+            using_persistent = '/opt/render/project/data' in db.db_path
+            response["database"] = {
                 "path": db.db_path,
-                "persistent": using_persistent,
-                "domains": domain_count,
-                "clients": client_count
+                "persistent": using_persistent
             }
-        })
+
+            # Try to get counts
+            try:
+                domain_count = len(db.get_all_domains())
+                client_count = len(db.get_all_clients())
+                response["database"]["domains"] = domain_count
+                response["database"]["clients"] = client_count
+            except:
+                pass
+        except:
+            pass
+
+        return jsonify(response)
+
     except Exception as e:
+        # Minimal error response
         return jsonify({
             "status": "unhealthy",
-            "service": "email-redirect-tool",
-            "timestamp": datetime.now().isoformat(),
             "error": str(e)
         }), 500
 
