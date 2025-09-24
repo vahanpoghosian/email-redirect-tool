@@ -1326,7 +1326,7 @@ DASHBOARD_TEMPLATE = """
         async function handleRedirectSubmit(form, domainName) {
             console.log('handleRedirectSubmit called for:', domainName);
             
-            const statusId = 'status-' + domainName.replace(/\./g, '-');
+            const statusId = 'status-' + domainName.replace(/\\./g, '-');
             const statusElement = document.getElementById(statusId);
             const submitButton = form.querySelector('button[type="submit"]');
             const targetInput = form.querySelector('input[name="target"]');
