@@ -14,35 +14,8 @@ class Database:
             self.db_path = db_path
         else:
             import os
-            # 1. First check environment variable (highest priority)
-            if os.environ.get('DATABASE_PATH'):
-                self.db_path = os.environ.get('DATABASE_PATH')
-                # Create directory if it doesn't exist
-                db_dir = os.path.dirname(self.db_path)
-                if db_dir and not os.path.exists(db_dir):
-                    try:
-                        os.makedirs(db_dir, exist_ok=True)
-                        print(f"Created database directory: {db_dir}")
-                    except Exception as e:
-                        print(f"Could not create directory {db_dir}: {e}")
-                print(f"Using DATABASE_PATH from environment: {self.db_path}")
-            # 2. Check for Render persistent disk
-            elif os.path.exists('/opt/render/project/data'):
-                self.db_path = '/opt/render/project/data/redirect_tool.db'
-                print(f"Using Render persistent disk at: {self.db_path}")
-            # 3. Try to create persistent directory
-            elif os.path.exists('/opt/render/project'):
-                try:
-                    os.makedirs('/opt/render/project/data', exist_ok=True)
-                    self.db_path = '/opt/render/project/data/redirect_tool.db'
-                    print(f"Created and using persistent path: {self.db_path}")
-                except:
-                    self.db_path = 'redirect_tool.db'
-                    print(f"Could not create persistent path, using default: {self.db_path}")
-            # 4. Default local path
-            else:
-                self.db_path = 'redirect_tool.db'
-                print(f"Using default local path: {self.db_path}")
+            # Use environment variable if available (for production)
+            self.db_path = os.environ.get('DATABASE_PATH', 'redirect_tool.db')
 
         print(f"Using database at: {self.db_path}")
         self.init_database()

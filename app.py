@@ -1037,7 +1037,7 @@ DASHBOARD_TEMPLATE = """
                 }
 
                 // Auto-fill redirect URL field with client URL
-                const domainSafeId = domainName.replace(/\\./g, '-');
+                const domainSafeId = domainName.replace(/\./g, '-');
                 const selectElement = document.querySelector(`select[onchange*="${domainName}"]`);
 
                 if (selectElement) {
@@ -1326,7 +1326,7 @@ DASHBOARD_TEMPLATE = """
         async function handleRedirectSubmit(form, domainName) {
             console.log('handleRedirectSubmit called for:', domainName);
             
-            const statusId = 'status-' + domainName.replace(/\\./g, '-');
+            const statusId = 'status-' + domainName.replace(/\./g, '-');
             const statusElement = document.getElementById(statusId);
             const submitButton = form.querySelector('button[type="submit"]');
             const targetInput = form.querySelector('input[name="target"]');
@@ -1508,17 +1508,8 @@ CLIENTS_TEMPLATE = """
 </html>
 """
 
-# Initialize database and email redirection manager
+# Initialize database
 db = Database()
-
-# Log database location for verification
-print(f"📁 Database initialized at: {db.db_path}")
-if '/opt/render/project/data' in db.db_path:
-    print("✅ Using Render persistent disk - data will survive deployments")
-else:
-    print("⚠️  Using local storage - data may be lost on deployment")
-    if os.environ.get('RENDER'):
-        print("📌 Ensure DATABASE_PATH env var is set in Render dashboard")
 
 # Lazy initialization - don't connect to Namecheap on startup
 email_manager = None
@@ -1528,11 +1519,21 @@ def get_email_manager():
     global email_manager
     if email_manager is None:
         try:
+            print("Attempting to initialize Email Redirection Manager...")
+            print(f"Environment variables present:")
+            print(f"  NAMECHEAP_API_USER: {bool(os.environ.get('NAMECHEAP_API_USER'))}")
+            print(f"  NAMECHEAP_API_KEY: {bool(os.environ.get('NAMECHEAP_API_KEY'))}")
+            print(f"  NAMECHEAP_USERNAME: {bool(os.environ.get('NAMECHEAP_USERNAME'))}")
+            print(f"  NAMECHEAP_CLIENT_IP: {os.environ.get('NAMECHEAP_CLIENT_IP', 'Not set')}")
+
             email_manager = EmailRedirectionManager()
-            print("Email Redirection Manager initialized successfully")
+            print("✅ Email Redirection Manager initialized successfully")
         except Exception as e:
-            print(f"Warning: Could not initialize Email Redirection Manager: {e}")
-            raise
+            print(f"❌ Error: Could not initialize Email Redirection Manager: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't raise - return None so endpoints can show error
+            return None
     return email_manager
 
 # Authentication decorator
@@ -1867,7 +1868,8 @@ def sync_all_domains():
     global sync_progress
     
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({"error": "Email manager not initialized"}), 503
         
         # Check if sync is already running
@@ -1953,9 +1955,9 @@ def get_sync_errors():
         "last_sync_status": sync_progress["status"]
     })
 
-@app.route('/api/backup-database', methods=['GET', 'POST'])
+@app.route('/api/backup-database', methods=['POST'])
 def backup_database():
-    """Create a comprehensive backup of all database data"""
+    """Create a backup of current database state"""
     try:
         import json
         from datetime import datetime
@@ -1964,53 +1966,24 @@ def backup_database():
         domains = db.get_all_domains_with_redirections()
         clients = db.get_all_clients()
 
-        # Get DNS records for all domains
-        dns_records = {}
-        for domain in domains:
-            domain_name = domain.get('domain_name')
-            if domain_name:
-                records = db.get_current_dns_records(domain_name)
-                if records:
-                    dns_records[domain_name] = records
-
         backup_data = {
             "timestamp": datetime.now().isoformat(),
-            "version": "3.0",
             "domains": domains,
-            "clients": clients,
-            "dns_records": dns_records,
-            "database_path": db.db_path
+            "clients": clients
         }
 
-        if request.method == 'GET':
-            # Return as downloadable file
-            response = make_response(json.dumps(backup_data, indent=2))
-            response.headers['Content-Type'] = 'application/json'
-            response.headers['Content-Disposition'] = f'attachment; filename=redirect_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-            return response
-        else:
-            # Save to file and return status
-            backup_filename = f"db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save to a backup file (this would ideally be sent to external storage)
+        backup_filename = f"db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(backup_filename, 'w') as f:
+            json.dump(backup_data, f, indent=2)
 
-            # Try to save in persistent location
-            import os
-            if os.path.exists('/opt/render/project/data'):
-                backup_path = f'/opt/render/project/data/{backup_filename}'
-            else:
-                backup_path = backup_filename
-
-            with open(backup_path, 'w') as f:
-                json.dump(backup_data, f, indent=2)
-
-            return jsonify({
-                "status": "success",
-                "message": f"Database backed up successfully",
-                "backup_file": backup_path,
-                "domains_count": len(domains),
-                "clients_count": len(clients),
-                "dns_records_count": len(dns_records),
-                "backup_data": backup_data
-            })
+        return jsonify({
+            "status": "success",
+            "message": f"Database backed up to {backup_filename}",
+            "backup_file": backup_filename,
+            "domains_count": len(domains),
+            "clients_count": len(clients)
+        })
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -2019,7 +1992,8 @@ def backup_database():
 def debug_dns_records(domain_name):
     """Debug DNS records for a specific domain"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({"error": "Email manager not initialized"}), 503
 
         print(f"🔍 DEBUGGING DNS for domain: {domain_name}")
@@ -2119,23 +2093,11 @@ def restore_database():
             except Exception as e:
                 print(f"Warning: Could not restore domain {domain.get('domain_name')}: {e}")
 
-        # Restore DNS records if available
-        dns_records = backup_data.get('dns_records', {})
-        dns_restored = 0
-        for domain_name, records in dns_records.items():
-            try:
-                if records:
-                    db.backup_dns_records(domain_name, records)
-                    dns_restored += 1
-            except Exception as e:
-                print(f"Warning: Could not restore DNS records for {domain_name}: {e}")
-
         return jsonify({
             "status": "success",
             "message": "Database restored successfully",
             "restored_domains": len(domains),
-            "restored_clients": len(clients),
-            "restored_dns_records": dns_restored
+            "restored_clients": len(clients)
         })
 
     except Exception as e:
@@ -2476,7 +2438,8 @@ def bulk_update():
 def get_domains_with_redirections():
     """Get all domains with their redirections for editing"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({
                 "status": "error",
                 "message": "Email manager not initialized. Check API credentials."
@@ -2560,7 +2523,8 @@ def get_domains_with_redirections():
 def update_redirection():
     """Update a domain redirection"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({
                 "status": "error",
                 "message": "Email manager not initialized. Check API credentials."
@@ -2602,7 +2566,8 @@ def update_redirection():
 def get_domains_batch():
     """Get a batch of domains with redirections (paginated)"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({
                 "status": "error",
                 "message": "Email manager not initialized. Check API credentials."
@@ -2680,7 +2645,8 @@ def get_domains_batch():
 def get_all_redirections():
     """Get all domain URL redirections from all domains"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({
                 "status": "error",
                 "message": "Email manager not initialized. Check API credentials."
@@ -2754,7 +2720,8 @@ def get_all_redirections():
 def get_domains():
     """Get all domains from Namecheap account"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({
                 "status": "error",
                 "message": "Email manager not initialized. Check API credentials."
@@ -2847,7 +2814,8 @@ def debug_api():
         except:
             actual_ip = 'Could not detect'
         
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return jsonify({
                 "status": "error",
                 "message": "Email manager not initialized",
@@ -2888,50 +2856,46 @@ def debug_api():
             "timestamp": datetime.now().isoformat()
         })
 
+@app.route('/api/debug-init', methods=['GET'])
+def debug_init():
+    """Debug endpoint to check initialization issues"""
+    import os
+
+    debug_info = {
+        "environment_vars": {
+            "NAMECHEAP_API_USER": bool(os.environ.get('NAMECHEAP_API_USER')),
+            "NAMECHEAP_API_KEY": bool(os.environ.get('NAMECHEAP_API_KEY')),
+            "NAMECHEAP_USERNAME": bool(os.environ.get('NAMECHEAP_USERNAME')),
+            "NAMECHEAP_CLIENT_IP": os.environ.get('NAMECHEAP_CLIENT_IP', 'Not set'),
+            "DATABASE_PATH": os.environ.get('DATABASE_PATH', 'Not set')
+        },
+        "initialization_attempt": {}
+    }
+
+    # Try to initialize and capture the error
+    try:
+        test_manager = EmailRedirectionManager()
+        debug_info["initialization_attempt"]["success"] = True
+        debug_info["initialization_attempt"]["message"] = "Manager initialized successfully"
+    except Exception as e:
+        debug_info["initialization_attempt"]["success"] = False
+        debug_info["initialization_attempt"]["error"] = str(e)
+        debug_info["initialization_attempt"]["error_type"] = type(e).__name__
+
+        # Try to get more specific info
+        import traceback
+        debug_info["initialization_attempt"]["traceback"] = traceback.format_exc()
+
+    return jsonify(debug_info)
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint with database status"""
-    try:
-        # Simple health check first
-        response = {
-            "status": "healthy",
-            "service": "email-redirect-tool"
-        }
-
-        # Try to add timestamp
-        try:
-            response["timestamp"] = datetime.now().isoformat()
-        except:
-            import time
-            response["timestamp"] = time.time()
-
-        # Try to add database info
-        try:
-            using_persistent = '/opt/render/project/data' in db.db_path
-            response["database"] = {
-                "path": db.db_path,
-                "persistent": using_persistent
-            }
-
-            # Try to get counts
-            try:
-                domain_count = len(db.get_all_domains())
-                client_count = len(db.get_all_clients())
-                response["database"]["domains"] = domain_count
-                response["database"]["clients"] = client_count
-            except:
-                pass
-        except:
-            pass
-
-        return jsonify(response)
-
-    except Exception as e:
-        # Minimal error response
-        return jsonify({
-            "status": "unhealthy",
-            "error": str(e)
-        }), 500
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "service": "email-redirect-tool",
+        "timestamp": datetime.now().isoformat()
+    })
 
 @app.route('/api/debug-db', methods=['GET'])
 def debug_database():
@@ -2976,7 +2940,8 @@ def update_domain_status():
 def sync_domains_form():
     """Handle sync domains form submission"""
     try:
-        if not email_manager:
+        manager = get_email_manager()
+        if not manager:
             return "Email manager not initialized", 503
         
         # Start background sync task
