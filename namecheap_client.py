@@ -25,20 +25,37 @@ class NamecheapAPIClient:
         self.api_key = os.environ.get('NAMECHEAP_API_KEY')
         self.username = os.environ.get('NAMECHEAP_USERNAME', self.api_user)
         
-        # Use the configured IP from environment variable
-        self.client_ip = os.environ.get('NAMECHEAP_CLIENT_IP', '44.226.145.213')
+        # Auto-detect our outbound IP with fallback to configured one
+        self.client_ip = self._detect_outbound_ip()
 
         print(f"Namecheap API Client initialized:")
         print(f"  API User: {self.api_user}")
         print(f"  Client IP: {self.client_ip}")
         print(f"  API Key: {'Present' if self.api_key else 'Missing'}")
-        
-        # Check for missing environment variables
+
         if not all([self.api_user, self.api_key]):
             missing = []
             if not self.api_user: missing.append('NAMECHEAP_API_USER')
             if not self.api_key: missing.append('NAMECHEAP_API_KEY')
             raise NamecheapAPIError(f"Missing required environment variables: {', '.join(missing)}")
+
+        if not self.client_ip:
+            raise NamecheapAPIError("Could not detect outbound IP address")
+
+    def _detect_outbound_ip(self) -> str:
+        """Auto-detect our actual outbound IP address"""
+        try:
+            import requests
+            response = requests.get('https://httpbin.org/ip', timeout=10)
+            ip = response.json().get('origin', '').strip()
+            print(f"🔍 Auto-detected outbound IP: {ip}")
+            return ip
+        except Exception as e:
+            print(f"❌ Failed to auto-detect IP: {e}")
+            # Fallback to environment variable if detection fails
+            fallback_ip = os.environ.get('NAMECHEAP_CLIENT_IP', '44.226.145.213')
+            print(f"🔧 Using fallback IP from environment: {fallback_ip}")
+            return fallback_ip
 
         # Check for placeholder values
         placeholder_indicators = ['YOUR_NAMECHEAP', 'YOUR_API', 'PLACEHOLDER', 'CHANGE_ME']
