@@ -7,6 +7,8 @@ const ClientManager = ({ clients: initialClients, onClose }) => {
   const [newClientUrl, setNewClientUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
+  const [bulkData, setBulkData] = useState('');
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   useEffect(() => {
     loadClients();
@@ -114,6 +116,41 @@ const ClientManager = ({ clients: initialClients, onClose }) => {
     setNewClientUrl('');
   };
 
+  const handleBulkImport = async (e) => {
+    e.preventDefault();
+
+    if (!bulkData.trim()) {
+      alert('Please enter client data to import');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await axios.post('/clients', new URLSearchParams({
+        action: 'bulk_import',
+        bulk_data: bulkData.trim()
+      }), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }
+      });
+
+      // Clear the bulk data and reload clients
+      setBulkData('');
+      setShowBulkImport(false);
+      await loadClients();
+
+      // Show success message (you can enhance this with a proper notification system)
+      alert('Bulk import completed! Check the results.');
+
+    } catch (error) {
+      alert('Error importing clients: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -206,6 +243,64 @@ const ClientManager = ({ clients: initialClients, onClose }) => {
             )}
           </div>
         </form>
+
+        {/* Bulk Import Section */}
+        <div style={{ marginBottom: '2rem', padding: '1.5rem', background: '#eff6ff', borderRadius: '8px', border: '2px solid #3b82f6' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ color: '#1e40af', margin: 0 }}>📋 Bulk Import from Google Sheets</h3>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setShowBulkImport(!showBulkImport)}
+              style={{ padding: '0.5rem 1rem', background: showBulkImport ? '#6b7280' : '#1d4ed8' }}
+            >
+              {showBulkImport ? 'Hide' : 'Show Bulk Import'}
+            </button>
+          </div>
+
+          {showBulkImport && (
+            <>
+              <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+                Paste your client data from Google Sheets. Format: <strong>Client Name</strong> (tab) <strong>Website URL</strong> per line
+              </p>
+
+              <form onSubmit={handleBulkImport}>
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
+                    Client Data (Tab-separated values)
+                  </label>
+                  <textarea
+                    className="form-control"
+                    placeholder={`ApeX\thttps://www.apex.exchange/
+Atmos\thttps://atmosfunded.com/
+Ben's Natural Health\thttps://www.bensnaturalhealth.com/
+CasinooftheKings\thttps://casinoofthekings.ca/
+Click Intelligence\thttp://clickintelligence.co.uk/`}
+                    value={bulkData}
+                    onChange={(e) => setBulkData(e.target.value)}
+                    style={{ minHeight: '120px', fontFamily: 'monospace', fontSize: '14px' }}
+                    disabled={isSubmitting}
+                    required
+                  />
+                  <small style={{ color: '#6b7280', marginTop: '0.5rem', display: 'block' }}>
+                    💡 <strong>Tip:</strong> Copy and paste directly from Google Sheets. Each row should have Client Name in first column, URL in second column.
+                  </small>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <button
+                    type="submit"
+                    className="btn btn-success"
+                    style={{ background: '#1d4ed8' }}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? 'Importing...' : '📥 Import All Clients'}
+                  </button>
+                  <span style={{ color: '#64748b', fontSize: '14px' }}>This will add all clients at once</span>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
 
         {/* Clients List */}
         <h3>Existing Clients ({clients.length})</h3>
