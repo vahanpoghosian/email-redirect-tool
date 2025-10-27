@@ -184,11 +184,6 @@ body {
   border-left-color: #f59e0b;
 }
 
-.sync-status.rate-limited {
-  border-left-color: #f59e0b;
-  background: #fffbeb;
-}
-
 /* Utilities */
 .flex {
   display: flex;

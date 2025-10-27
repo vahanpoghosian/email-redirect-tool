@@ -49,8 +49,6 @@ const SyncProgress = ({ onComplete }) => {
         return 'sync-status error';
       case 'stopped':
         return 'sync-status stopped';
-      case 'rate_limited':
-        return 'sync-status rate-limited';
       default:
         return 'sync-status';
     }
@@ -66,8 +64,6 @@ const SyncProgress = ({ onComplete }) => {
         return 'Status: Failed';
       case 'stopped':
         return 'Status: Stopped by User';
-      case 'rate_limited':
-        return 'Status: Paused - Rate Limited';
       default:
         return 'Status: Initializing...';
     }
@@ -116,52 +112,6 @@ const SyncProgress = ({ onComplete }) => {
                 Recent errors: {progress.errors.join(', ')}
               </>
             )}
-          </>
-        )}
-
-        {progress.status === 'rate_limited' && (
-          <>
-            Synced {progress.processed} of {progress.total} domains (paused)
-            <br />
-            Added: {progress.domains_added} | Updated: {progress.domains_updated}
-            {(progress.total_errors || progress.errors.length) > 0 && (
-              <> | Errors: {progress.total_errors || progress.errors.length}</>
-            )}
-            <br />
-            <div style={{
-              marginTop: '1rem',
-              padding: '1rem',
-              backgroundColor: '#fef3c7',
-              borderRadius: '6px',
-              borderLeft: '4px solid #f59e0b'
-            }}>
-              <div style={{ fontWeight: '600', color: '#92400e', marginBottom: '0.5rem' }}>
-                ⚠️ Rate Limit Reached
-              </div>
-              <div style={{ color: '#92400e', fontSize: '0.875rem', marginBottom: '1rem' }}>
-                {progress.rate_limit_message || 'Sync paused due to Namecheap API rate limits.'}
-              </div>
-              <button
-                onClick={async () => {
-                  try {
-                    await axios.post('/api/resume-sync');
-                  } catch (error) {
-                    alert('Failed to resume sync: ' + error.message);
-                  }
-                }}
-                style={{
-                  backgroundColor: '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                🔄 Resume Sync
-              </button>
-            </div>
           </>
         )}
       </div>
