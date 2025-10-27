@@ -3,7 +3,7 @@ Email Redirection Tool - Flask Application
 View existing email forwarding for Namecheap domains
 """
 
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_from_directory
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_from_directory, flash, get_flashed_messages
 from flask_cors import CORS
 import json
 import os
@@ -1437,12 +1437,24 @@ CLIENTS_TEMPLATE = """
     </div>
     
     <div class="container">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div style="padding: 1rem; margin-bottom: 1rem; border-radius: 8px; {% if category == 'success' %}background: #d1fae5; color: #065f46; border: 1px solid #10b981;{% elif category == 'warning' %}background: #fef3c7; color: #92400e; border: 1px solid #f59e0b;{% else %}background: #fee2e2; color: #991b1b; border: 1px solid #ef4444;{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                 <h1>Client Management</h1>
                 <a href="/" class="btn">← Back to Dashboard</a>
             </div>
             
+            <!-- Single Client Add -->
             <div style="margin-bottom: 2rem; padding: 1.5rem; background: #f8fafc; border-radius: 8px;">
                 <h2 style="margin-bottom: 1rem;">Add New Client</h2>
                 <form method="POST" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
@@ -1456,6 +1468,32 @@ CLIENTS_TEMPLATE = """
                         <input type="text" name="client_url" class="form-control" placeholder="https://client-website.com">
                     </div>
                     <button type="submit" class="btn btn-success">➕ Add Client</button>
+                </form>
+            </div>
+
+            <!-- Bulk Import Section -->
+            <div style="margin-bottom: 2rem; padding: 1.5rem; background: #eff6ff; border-radius: 8px; border: 2px solid #3b82f6;">
+                <h2 style="margin-bottom: 1rem; color: #1e40af;">📋 Bulk Import from Google Sheets</h2>
+                <p style="margin-bottom: 1rem; color: #64748b;">Paste your client data from Google Sheets. Format: <strong>Client Name</strong> (tab) <strong>Website URL</strong> per line</p>
+
+                <form method="POST" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <input type="hidden" name="action" value="bulk_import">
+                    <div>
+                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Client Data (Tab-separated values)</label>
+                        <textarea name="bulk_data" class="form-control" placeholder="ApeX	https://www.apex.exchange/
+Atmos	https://atmosfunded.com/
+Ben's Natural Health	https://www.bensnaturalhealth.com/
+CasinooftheKings	https://casinoofthekings.ca/
+Click Intelligence	http://clickintelligence.co.uk/"
+                        style="min-height: 150px; font-family: monospace; font-size: 14px;" required></textarea>
+                        <small style="color: #6b7280; margin-top: 0.5rem; display: block;">
+                            💡 <strong>Tip:</strong> Copy and paste directly from Google Sheets. Each row should have Client Name in first column, URL in second column.
+                        </small>
+                    </div>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button type="submit" class="btn btn-success" style="background: #1d4ed8;">📥 Import All Clients</button>
+                        <span style="color: #64748b; font-size: 14px;">This will add all clients at once</span>
+                    </div>
                 </form>
             </div>
             
@@ -1680,9 +1718,65 @@ def clients_page():
                 
         elif action == 'delete':
             client_id = request.form.get('client_id')
-            
+
             if client_id:
                 db.delete_client(int(client_id))
+
+        elif action == 'bulk_import':
+            bulk_data = request.form.get('bulk_data', '').strip()
+
+            if bulk_data:
+                success_count = 0
+                error_count = 0
+                errors = []
+
+                # Process each line
+                lines = bulk_data.split('\n')
+                for line_num, line in enumerate(lines, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # Split by tab or multiple spaces/tabs
+                    import re
+                    parts = re.split(r'\t+|\s{2,}', line)
+
+                    if len(parts) >= 1:
+                        client_name = parts[0].strip()
+                        client_url = parts[1].strip() if len(parts) > 1 else None
+
+                        # Clean up URL if present
+                        if client_url:
+                            if not client_url.startswith(('http://', 'https://')):
+                                client_url = 'https://' + client_url
+
+                        try:
+                            if client_name:
+                                # Check if client already exists
+                                existing_clients = db.get_all_clients()
+                                client_exists = any(c['name'].lower() == client_name.lower() for c in existing_clients)
+
+                                if not client_exists:
+                                    db.add_client(client_name, client_url)
+                                    success_count += 1
+                                else:
+                                    errors.append(f"Line {line_num}: Client '{client_name}' already exists")
+                                    error_count += 1
+                            else:
+                                errors.append(f"Line {line_num}: Empty client name")
+                                error_count += 1
+                        except Exception as e:
+                            errors.append(f"Line {line_num}: Error adding '{client_name}': {str(e)}")
+                            error_count += 1
+                    else:
+                        errors.append(f"Line {line_num}: Invalid format - need at least client name")
+                        error_count += 1
+
+                # Add flash message with results
+                if success_count > 0:
+                    flash(f"✅ Successfully imported {success_count} clients!", "success")
+                if error_count > 0:
+                    flash(f"⚠️ {error_count} errors occurred: " + "; ".join(errors[:3]) + ("..." if len(errors) > 3 else ""), "warning")
     
     clients = db.get_all_clients()
     return render_template_string(CLIENTS_TEMPLATE, clients=clients)
