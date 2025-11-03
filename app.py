@@ -3459,7 +3459,7 @@ def catch_all(path):
     except FileNotFoundError:
         return "React app not built", 404
 
-def background_bulk_dns_update(domains, record_data, resume_from_index=None):
+def background_bulk_dns_update(domains, records_data, resume_from_index=None):
     """Background function to handle bulk DNS updates with rate limiting"""
     global bulk_dns_progress
 
@@ -3468,7 +3468,9 @@ def background_bulk_dns_update(domains, record_data, resume_from_index=None):
         start_index = resume_from_index if resume_from_index is not None else 0
 
         print(f"🌐 Starting bulk DNS update for {len(domains)} domains from index {start_index}")
-        print(f"📝 Record: {record_data['type']} {record_data['name']} -> {record_data['address']}")
+        print(f"📝 Records: {len(records_data)} record(s) to add")
+        for record in records_data:
+            print(f"   - {record['type']} {record['name']} -> {record['address']}")
 
         # Process domains with rate limiting
         for i, domain_name in enumerate(domains[start_index:], start_index + 1):
@@ -3497,26 +3499,30 @@ def background_bulk_dns_update(domains, record_data, resume_from_index=None):
                     if existing_hosts is None:
                         raise Exception("Could not fetch existing DNS records")
 
-                    # Add the new record to existing records
-                    new_record = {
-                        'Name': record_data['name'],
-                        'Type': record_data['type'],
-                        'Address': record_data['address'],
-                        'TTL': record_data['ttl']
-                    }
+                    # Start with existing records
+                    all_records = list(existing_hosts)
 
-                    # Add MXPref for MX records
-                    if record_data['type'] == 'MX' and record_data.get('mx_pref'):
-                        new_record['MXPref'] = record_data['mx_pref']
+                    # Add each new record
+                    for record_data in records_data:
+                        new_record = {
+                            'Name': record_data['name'],
+                            'Type': record_data['type'],
+                            'Address': record_data['address'],
+                            'TTL': record_data['ttl']
+                        }
 
-                    # Remove any existing record with same name and type
-                    filtered_hosts = [
-                        host for host in existing_hosts
-                        if not (host.get('Name') == record_data['name'] and host.get('Type') == record_data['type'])
-                    ]
+                        # Add MXPref for MX records
+                        if record_data['type'] == 'MX' and record_data.get('mx_pref'):
+                            new_record['MXPref'] = record_data['mx_pref']
 
-                    # Add the new record
-                    all_records = filtered_hosts + [new_record]
+                        # Remove any existing record with same name and type
+                        all_records = [
+                            host for host in all_records
+                            if not (host.get('Name') == record_data['name'] and host.get('Type') == record_data['type'])
+                        ]
+
+                        # Add the new record
+                        all_records.append(new_record)
 
                     # Update DNS via setHosts API
                     domain_parts = domain_name.split('.')
@@ -3624,19 +3630,20 @@ def bulk_dns_update():
     try:
         data = request.get_json()
         domains = data.get('domains', [])
-        record_data = data.get('record', {})
+        records_data = data.get('records', [])
 
         if not domains:
             return jsonify({"error": "No domains provided"}), 400
 
-        if not record_data:
-            return jsonify({"error": "No record data provided"}), 400
+        if not records_data:
+            return jsonify({"error": "No records data provided"}), 400
 
-        # Validate record data
+        # Validate each record data
         required_fields = ['type', 'name', 'address', 'ttl']
-        for field in required_fields:
-            if field not in record_data:
-                return jsonify({"error": f"Missing required field: {field}"}), 400
+        for record_data in records_data:
+            for field in required_fields:
+                if field not in record_data:
+                    return jsonify({"error": f"Missing required field: {field}"}), 400
 
         # Check if update is already running
         if bulk_dns_progress["status"] == "running":
@@ -3654,11 +3661,11 @@ def bulk_dns_update():
             "paused_at_index": None,
             "rate_limit_message": None,
             "paused_domains": domains,
-            "record_data": record_data
+            "records_data": records_data
         }
 
         # Start background update
-        dns_thread = threading.Thread(target=background_bulk_dns_update, args=(domains, record_data))
+        dns_thread = threading.Thread(target=background_bulk_dns_update, args=(domains, records_data))
         dns_thread.daemon = True
         dns_thread.start()
 
@@ -3721,7 +3728,7 @@ def resume_bulk_dns():
         # Start background thread to resume
         dns_thread = threading.Thread(
             target=background_bulk_dns_update,
-            args=(bulk_dns_progress["paused_domains"], bulk_dns_progress["record_data"], bulk_dns_progress["paused_at_index"])
+            args=(bulk_dns_progress["paused_domains"], bulk_dns_progress["records_data"], bulk_dns_progress["paused_at_index"])
         )
         dns_thread.daemon = True
         dns_thread.start()
