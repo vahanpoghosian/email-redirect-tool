@@ -3515,11 +3515,22 @@ def background_bulk_dns_update(domains, records_data, resume_from_index=None):
                         if record_data['type'] == 'MX' and record_data.get('mx_pref'):
                             new_record['MXPref'] = record_data['mx_pref']
 
-                        # Remove any existing record with same name and type
-                        all_records = [
-                            host for host in all_records
-                            if not (host.get('Name') == record_data['name'] and host.get('Type') == record_data['type'])
-                        ]
+                        # For TXT records, only remove exact duplicates (same name, type, and value)
+                        # For other record types, remove existing records with same name and type
+                        if record_data['type'] == 'TXT':
+                            # Only remove if exact duplicate (same name, type, and address)
+                            all_records = [
+                                host for host in all_records
+                                if not (host.get('Name') == record_data['name'] and
+                                       host.get('Type') == record_data['type'] and
+                                       host.get('Address') == record_data['address'])
+                            ]
+                        else:
+                            # For non-TXT records, replace existing records with same name and type
+                            all_records = [
+                                host for host in all_records
+                                if not (host.get('Name') == record_data['name'] and host.get('Type') == record_data['type'])
+                            ]
 
                         # Add the new record
                         all_records.append(new_record)
