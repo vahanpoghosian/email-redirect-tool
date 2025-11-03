@@ -2288,11 +2288,21 @@ def resume_sync():
 
         print(f"🔄 Resuming sync from index {sync_progress['paused_at_index']}")
 
-        # Start background thread to resume
-        sync_thread = threading.Thread(
-            target=background_sync_with_rate_limiting,
-            args=(sync_progress["paused_at_index"],)
-        )
+        # Check if we're resuming a selected domains sync or full sync
+        paused_domains = sync_progress.get("paused_domains")
+        if paused_domains and len(paused_domains) != len(sync_progress.get("all_domains", [])):
+            # This is a selected domains sync - use the specialized function
+            sync_thread = threading.Thread(
+                target=background_sync_selected_domains,
+                args=(paused_domains, sync_progress["paused_at_index"])
+            )
+        else:
+            # This is a full sync - use the main sync function
+            sync_thread = threading.Thread(
+                target=background_sync_with_rate_limiting,
+                args=(sync_progress["paused_at_index"],)
+            )
+
         sync_thread.daemon = True
         sync_thread.start()
 
@@ -2326,64 +2336,15 @@ def sync_selected_domains():
             "domains_added": 0,
             "domains_updated": 0,
             "errors": [],
-            "should_stop": False
+            "should_stop": False,
+            "paused_at_index": None,
+            "rate_limit_message": None,
+            "paused_domains": selected_domains
         }
 
         # Start background sync for selected domains
         def sync_selected():
-            global sync_progress
-            sync_progress["status"] = "running"
-
-            for i, domain_name in enumerate(selected_domains, 1):
-                # Check if sync should stop
-                if sync_progress["should_stop"]:
-                    sync_progress["status"] = "stopped"
-                    sync_progress["current_domain"] = ""
-                    return
-
-                sync_progress["processed"] = i
-                sync_progress["current_domain"] = domain_name
-
-                try:
-                    # Sync single domain with retry logic
-                    retry = 0
-                    max_retries = 3
-                    synced = False
-
-                    while retry < max_retries and not synced:
-                        try:
-                            # Get redirections for this domain
-                            redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
-
-                            if redirections is not None:
-                                # Update domain redirections
-                                db.add_or_update_domain(domain_name)
-                                db.update_domain_redirections(domain_name, redirections)
-                                db.update_domain_sync_status(domain_name, 'synced')
-                                sync_progress["domains_updated"] += 1
-                                synced = True
-                            else:
-                                db.update_domain_sync_status(domain_name, 'not_synced')
-
-                        except Exception as e:
-                            retry += 1
-                            error_msg = str(e).lower()
-                            if ("too many requests" in error_msg or "rate limit" in error_msg) and retry < max_retries:
-                                time.sleep(5 * retry)  # Progressive delay
-                            else:
-                                sync_progress["errors"].append(f"{domain_name}: {str(e)}")
-                                db.update_domain_sync_status(domain_name, 'not_synced')
-                                break
-
-                    # Add delay between domains
-                    if i < len(selected_domains):
-                        time.sleep(1.5)
-
-                except Exception as e:
-                    sync_progress["errors"].append(f"{domain_name}: {str(e)}")
-
-            sync_progress["status"] = "completed"
-            sync_progress["current_domain"] = ""
+            background_sync_selected_domains(selected_domains)
 
         thread = threading.Thread(target=sync_selected)
         thread.daemon = True
@@ -2393,6 +2354,92 @@ def sync_selected_domains():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+def background_sync_selected_domains(selected_domains, resume_from_index=None):
+    """Background function to sync selected domains with rate limiting"""
+    global sync_progress
+
+    try:
+        sync_progress["status"] = "running"
+        start_index = resume_from_index if resume_from_index is not None else 0
+
+        for i, domain_name in enumerate(selected_domains[start_index:], start_index + 1):
+            # Check if sync should stop
+            if sync_progress["should_stop"]:
+                sync_progress["status"] = "stopped"
+                sync_progress["current_domain"] = ""
+                return
+
+            sync_progress["processed"] = i
+            sync_progress["current_domain"] = domain_name
+
+            try:
+                # Sync single domain with retry logic
+                retry = 0
+                max_retries = 3
+                synced = False
+
+                while retry < max_retries and not synced:
+                    try:
+                        # Get redirections for this domain
+                        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+
+                        if redirections is not None:
+                            # Update domain redirections
+                            db.add_or_update_domain(domain_name)
+                            db.update_redirections(domain_name, redirections)
+                            db.update_domain_sync_status(domain_name, 'synced')
+                            sync_progress["domains_updated"] += 1
+                            synced = True
+                        else:
+                            db.update_domain_sync_status(domain_name, 'not_synced')
+
+                    except Exception as e:
+                        retry += 1
+                        error_msg = str(e)
+
+                        # Check for various rate limiting indicators
+                        is_rate_limited = (
+                            "too many requests" in error_msg.lower() or
+                            "rate limit" in error_msg.lower() or
+                            "connection/timeout error" in error_msg.lower() or
+                            "502" in error_msg or "503" in error_msg or "504" in error_msg
+                        )
+
+                        if is_rate_limited:
+                            if retry <= 2:  # Only retry twice, then pause
+                                wait_time = 5 * retry
+                                print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {retry}/{max_retries})")
+                                time.sleep(wait_time)
+                                continue
+                            else:
+                                # Rate limit hit, pause the sync
+                                print(f"🚫 Rate limit detected at domain {domain_name}. Pausing sync...")
+                                sync_progress["status"] = "rate_limited"
+                                sync_progress["current_domain"] = domain_name
+                                sync_progress["paused_at_index"] = i - 1  # Index where we need to resume (0-based)
+                                sync_progress["paused_domains"] = selected_domains
+                                sync_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait a few minutes and click Resume to continue."
+                                return  # Exit the sync function
+                        else:
+                            sync_progress["errors"].append(f"{domain_name}: {str(e)}")
+                            db.update_domain_sync_status(domain_name, 'not_synced')
+                            break
+
+                # Add delay between domains
+                if i < len(selected_domains):
+                    time.sleep(1.5)
+
+            except Exception as e:
+                sync_progress["errors"].append(f"{domain_name}: {str(e)}")
+
+        sync_progress["status"] = "completed"
+        sync_progress["current_domain"] = ""
+
+    except Exception as e:
+        print(f"Error in background sync: {e}")
+        sync_progress["status"] = "error"
+        sync_progress["errors"].append(f"Sync error: {str(e)}")
 
 @app.route('/api/sync-single-domain', methods=['POST'])
 @require_auth
