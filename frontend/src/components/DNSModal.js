@@ -106,7 +106,7 @@ const DNSModal = ({ selectedDomains, onClose }) => {
           type: record.type,
           name: record.name || '@',
           address: record.address.trim(),
-          ttl: record.ttl === 'Automatic' ? 'Automatic' : parseInt(record.ttl)
+          ttl: record.ttl === 'Automatic' ? 1800 : parseInt(record.ttl)
         }))
       };
 
