@@ -10,7 +10,7 @@ const DNSModal = ({ selectedDomains, onClose }) => {
     type: 'A',
     name: '@',
     address: '',
-    ttl: '1800'
+    ttl: 'Automatic'
   }]);
 
   // DNS Remove fields
@@ -26,6 +26,7 @@ const DNSModal = ({ selectedDomains, onClose }) => {
   ];
 
   const ttlOptions = [
+    { value: 'Automatic', label: 'Automatic' },
     { value: '60', label: '1 min' },
     { value: '300', label: '5 min' },
     { value: '1800', label: '30 min (default)' },
@@ -69,7 +70,7 @@ const DNSModal = ({ selectedDomains, onClose }) => {
       type: 'A',
       name: '@',
       address: '',
-      ttl: '1800'
+      ttl: 'Automatic'
     }]);
   };
 
@@ -105,7 +106,7 @@ const DNSModal = ({ selectedDomains, onClose }) => {
           type: record.type,
           name: record.name || '@',
           address: record.address.trim(),
-          ttl: parseInt(record.ttl)
+          ttl: record.ttl === 'Automatic' ? 'Automatic' : parseInt(record.ttl)
         }))
       };
 
