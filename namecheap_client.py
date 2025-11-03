@@ -605,6 +605,14 @@ class NamecheapAPIClient:
                 print(f"❌ Failed to update redirect in backup")
                 return False
 
+            # STEP 2.5: Filter out any remaining parking page records that might conflict
+            print(f"🔄 Step 2.5: Filtering out parking page records...")
+            original_count = len(complete_records)
+            complete_records = [r for r in complete_records if not self._is_parking_page_record(r, name)]
+            filtered_count = original_count - len(complete_records)
+            if filtered_count > 0:
+                print(f"🗑️  Filtered out {filtered_count} parking page record(s)")
+
             print(f"📦 Will send {len(complete_records)} DNS records to Namecheap")
 
             # Log what we're sending with detailed breakdown
@@ -688,7 +696,7 @@ class NamecheapAPIClient:
 
                     # Get updated DNS records to verify
                     updated_hosts = self._get_all_hosts(domain)
-                    if updated_hosts and len(updated_hosts) >= len(other_records):
+                    if updated_hosts and len(updated_hosts) >= len(complete_records):
                         print(f"✅ Verification passed: {len(updated_hosts)} records found")
                         return True
                     else:
@@ -722,6 +730,32 @@ class NamecheapAPIClient:
             print(f"❌ Error verifying domain redirection: {str(e)}")
             return False
     
+    def _is_parking_page_record(self, record: Dict, redirect_name: str) -> bool:
+        """Check if a DNS record is a parking page that should be removed when setting a redirect"""
+        record_name = record.get('Name', '@')
+        record_type = record.get('Type', '').upper()
+        record_address = record.get('Address', '').lower()
+
+        # Only check records for the same name as the redirect we're setting
+        if record_name != redirect_name:
+            return False
+
+        # Check for known parking page indicators
+        parking_indicators = [
+            'parkingpage.namecheap.com',
+            'parking',
+            'namecheap.com'
+        ]
+
+        # Remove CNAME or A records pointing to parking services
+        if record_type in ['CNAME', 'A']:
+            for indicator in parking_indicators:
+                if indicator in record_address:
+                    print(f"🎯 Detected parking page: {record_name} {record_type} -> {record_address}")
+                    return True
+
+        return False
+
     def _get_all_hosts(self, domain: str) -> List[Dict]:
         """Get all DNS host records for a domain"""
         try:

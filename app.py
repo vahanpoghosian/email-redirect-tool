@@ -1796,6 +1796,36 @@ sync_progress = {
     "paused_domains": None
 }
 
+# Global variable to track bulk DNS update progress
+bulk_dns_progress = {
+    "status": "idle",
+    "processed": 0,
+    "total": 0,
+    "current_domain": "",
+    "successful": 0,
+    "errors": [],
+    "should_stop": False,
+    "paused_at_index": None,
+    "rate_limit_message": None,
+    "paused_domains": None,
+    "record_data": None
+}
+
+# Global variable to track bulk DNS remove progress
+bulk_dns_remove_progress = {
+    "status": "idle",
+    "processed": 0,
+    "total": 0,
+    "current_domain": "",
+    "successful": 0,
+    "errors": [],
+    "should_stop": False,
+    "paused_at_index": None,
+    "rate_limit_message": None,
+    "paused_domains": None,
+    "remove_criteria": None
+}
+
 import threading
 import time
 
@@ -2875,7 +2905,7 @@ def get_all_redirections():
 
 @app.route('/api/domains', methods=['GET'])
 def get_domains():
-    """Get all domains from Namecheap account"""
+    """Get all domains - try Namecheap first, fallback to database"""
     try:
         manager = get_email_manager()
         if not manager:
@@ -2883,9 +2913,15 @@ def get_domains():
                 "status": "error",
                 "message": "Email manager not initialized. Check API credentials."
             }), 503
-        
-        # Get domains from Namecheap
-        domain_names = get_email_manager().get_all_domains()
+
+        # Try to get domains from Namecheap, but fallback to DB if rate limited
+        domain_names = []
+        try:
+            domain_names = get_email_manager().get_all_domains()
+            print(f"✅ Successfully fetched {len(domain_names)} domains from Namecheap")
+        except Exception as e:
+            print(f"⚠️ Could not fetch from Namecheap (likely rate limited): {e}")
+            print(f"📚 Falling back to database...")
 
         # Get domains with redirections from database
         db_domains = db.get_all_domains_with_redirections()
@@ -2906,10 +2942,18 @@ def get_domains():
         clients = db.get_all_clients()
         client_lookup = {c['id']: c for c in clients}
 
+        # If Namecheap failed (no domains), use database domains instead
+        if not domain_names and db_domains:
+            print(f"📚 Using {len(db_domains)} domains from database (Namecheap unavailable)")
+            domain_names = [d['domain_name'] for d in db_domains]
+
         # Transform domain names into objects that React expects
         domains = []
         for i, domain_name in enumerate(domain_names, 1):
             db_domain = db_lookup.get(domain_name, {})
+
+            # Use database domain number if available
+            domain_number = db_domain.get('domain_number', i)
 
             # Get the primary redirect URL from the redirections array
             redirect_url = ''
@@ -2936,7 +2980,7 @@ def get_domains():
 
             domain_obj = {
                 "domain_name": domain_name,
-                "domain_number": i,
+                "domain_number": domain_number,
                 "redirect_url": redirect_url,
                 "status": db_domain.get('sync_status', 'ready'),
                 "client_id": db_domain.get('client_id'),
@@ -3414,6 +3458,574 @@ def catch_all(path):
         return send_from_directory('frontend/build', 'index.html')
     except FileNotFoundError:
         return "React app not built", 404
+
+def background_bulk_dns_update(domains, record_data, resume_from_index=None):
+    """Background function to handle bulk DNS updates with rate limiting"""
+    global bulk_dns_progress
+
+    try:
+        bulk_dns_progress["status"] = "running"
+        start_index = resume_from_index if resume_from_index is not None else 0
+
+        print(f"🌐 Starting bulk DNS update for {len(domains)} domains from index {start_index}")
+        print(f"📝 Record: {record_data['type']} {record_data['name']} -> {record_data['address']}")
+
+        # Process domains with rate limiting
+        for i, domain_name in enumerate(domains[start_index:], start_index + 1):
+            # Check if update should stop
+            if bulk_dns_progress["should_stop"]:
+                bulk_dns_progress["status"] = "stopped"
+                bulk_dns_progress["current_domain"] = ""
+                print(f"⏹ Bulk DNS update stopped by user at domain {i}/{bulk_dns_progress['total']}")
+                return
+
+            bulk_dns_progress["processed"] = i
+            bulk_dns_progress["current_domain"] = domain_name
+
+            print(f"🌐 Processing DNS {i}/{bulk_dns_progress['total']}: {domain_name}")
+
+            # Add DNS record with retry logic for rate limits
+            dns_updated = False
+            dns_retry = 0
+            max_dns_retries = 3
+
+            while dns_retry < max_dns_retries and not dns_updated:
+                try:
+                    # Get current DNS records
+                    existing_hosts = get_email_manager().api_client._get_all_hosts(domain_name)
+
+                    if existing_hosts is None:
+                        raise Exception("Could not fetch existing DNS records")
+
+                    # Add the new record to existing records
+                    new_record = {
+                        'Name': record_data['name'],
+                        'Type': record_data['type'],
+                        'Address': record_data['address'],
+                        'TTL': record_data['ttl']
+                    }
+
+                    # Add MXPref for MX records
+                    if record_data['type'] == 'MX' and record_data.get('mx_pref'):
+                        new_record['MXPref'] = record_data['mx_pref']
+
+                    # Remove any existing record with same name and type
+                    filtered_hosts = [
+                        host for host in existing_hosts
+                        if not (host.get('Name') == record_data['name'] and host.get('Type') == record_data['type'])
+                    ]
+
+                    # Add the new record
+                    all_records = filtered_hosts + [new_record]
+
+                    # Update DNS via setHosts API
+                    domain_parts = domain_name.split('.')
+                    if len(domain_parts) < 2:
+                        raise Exception(f"Invalid domain format: {domain_name}")
+
+                    sld = domain_parts[0]
+                    tld = '.'.join(domain_parts[1:])
+
+                    # Handle common multi-part TLDs
+                    common_tlds = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au']
+                    for common_tld in common_tlds:
+                        if domain_name.endswith('.' + common_tld):
+                            sld = domain_name.replace('.' + common_tld, '')
+                            tld = common_tld
+                            break
+
+                    # Build setHosts parameters
+                    params = {'SLD': sld, 'TLD': tld}
+
+                    for idx, record in enumerate(all_records, 1):
+                        params[f'HostName{idx}'] = record['Name']
+                        params[f'RecordType{idx}'] = record['Type']
+                        params[f'Address{idx}'] = record['Address']
+                        params[f'TTL{idx}'] = record['TTL']
+                        if record.get('MXPref'):
+                            params[f'MXPref{idx}'] = record['MXPref']
+
+                    # Make API call
+                    response = get_email_manager().api_client._make_request('namecheap.domains.dns.setHosts', **params)
+
+                    # Check response
+                    command_response = None
+                    for key, value in response.items():
+                        if 'CommandResponse' in key:
+                            command_response = value
+                            break
+
+                    if command_response:
+                        hosts_result = None
+                        for key, value in command_response.items():
+                            if 'DomainDNSSetHostsResult' in key:
+                                hosts_result = value
+                                break
+
+                        if hosts_result and hosts_result.get('IsSuccess') == 'true':
+                            print(f"  ✅ DNS record added for {domain_name}")
+                            bulk_dns_progress["successful"] += 1
+                            dns_updated = True
+                        else:
+                            raise Exception(f"Namecheap API returned failure: {hosts_result}")
+                    else:
+                        raise Exception("Unexpected response format from Namecheap")
+
+                except Exception as dns_error:
+                    dns_retry += 1
+                    error_msg = str(dns_error)
+
+                    # Check for rate limiting indicators
+                    is_rate_limited = (
+                        "too many requests" in error_msg.lower() or
+                        "rate limit" in error_msg.lower() or
+                        "connection/timeout error" in error_msg.lower() or
+                        "502" in error_msg or "503" in error_msg or "504" in error_msg
+                    )
+
+                    if is_rate_limited:
+                        if dns_retry <= 2:  # Only retry twice, then pause
+                            wait_time = 5 * dns_retry
+                            print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            # Rate limit hit, pause the update
+                            print(f"🚫 Rate limit detected at domain {domain_name}. Pausing DNS update...")
+                            bulk_dns_progress["status"] = "rate_limited"
+                            bulk_dns_progress["current_domain"] = domain_name
+                            bulk_dns_progress["paused_at_index"] = i - 1
+                            bulk_dns_progress["paused_domains"] = domains
+                            bulk_dns_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait and click Resume to continue."
+                            return
+                    else:
+                        print(f"  ⚠️ Error updating DNS for {domain_name}: {dns_error}")
+                        bulk_dns_progress["errors"].append(f"{domain_name}: {str(dns_error)}")
+                        break
+
+            # Small delay between domains
+            time.sleep(1.5)
+
+        bulk_dns_progress["status"] = "completed"
+        bulk_dns_progress["current_domain"] = ""
+        print(f"✅ Bulk DNS update completed: {bulk_dns_progress['successful']} successful, {len(bulk_dns_progress['errors'])} errors")
+
+    except Exception as e:
+        print(f"❌ Bulk DNS update failed: {e}")
+        bulk_dns_progress["status"] = "error"
+        bulk_dns_progress["error"] = str(e)
+
+@app.route('/api/bulk-dns-update', methods=['POST'])
+@require_auth
+def bulk_dns_update():
+    """Start bulk DNS record update"""
+    global bulk_dns_progress
+
+    try:
+        data = request.get_json()
+        domains = data.get('domains', [])
+        record_data = data.get('record', {})
+
+        if not domains:
+            return jsonify({"error": "No domains provided"}), 400
+
+        if not record_data:
+            return jsonify({"error": "No record data provided"}), 400
+
+        # Validate record data
+        required_fields = ['type', 'name', 'address', 'ttl']
+        for field in required_fields:
+            if field not in record_data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        # Check if update is already running
+        if bulk_dns_progress["status"] == "running":
+            return jsonify({"error": "Bulk DNS update already in progress"}), 409
+
+        # Reset progress
+        bulk_dns_progress = {
+            "status": "starting",
+            "processed": 0,
+            "total": len(domains),
+            "current_domain": "",
+            "successful": 0,
+            "errors": [],
+            "should_stop": False,
+            "paused_at_index": None,
+            "rate_limit_message": None,
+            "paused_domains": domains,
+            "record_data": record_data
+        }
+
+        # Start background update
+        dns_thread = threading.Thread(target=background_bulk_dns_update, args=(domains, record_data))
+        dns_thread.daemon = True
+        dns_thread.start()
+
+        return jsonify({
+            "status": "started",
+            "total": len(domains),
+            "record_type": record_data['type']
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/bulk-dns-progress', methods=['GET'])
+def get_bulk_dns_progress():
+    """Get bulk DNS update progress"""
+    return jsonify({
+        "status": bulk_dns_progress["status"],
+        "processed": bulk_dns_progress["processed"],
+        "total": bulk_dns_progress["total"],
+        "current_domain": bulk_dns_progress["current_domain"],
+        "successful": bulk_dns_progress["successful"],
+        "errors": bulk_dns_progress["errors"][-5:] if bulk_dns_progress["errors"] else [],
+        "total_errors": len(bulk_dns_progress["errors"]) if bulk_dns_progress["errors"] else 0,
+        "rate_limit_message": bulk_dns_progress.get("rate_limit_message"),
+        "paused_at_index": bulk_dns_progress.get("paused_at_index")
+    })
+
+@app.route('/api/stop-bulk-dns', methods=['POST'])
+@require_auth
+def stop_bulk_dns():
+    """Stop bulk DNS update"""
+    global bulk_dns_progress
+
+    if bulk_dns_progress["status"] == "running":
+        bulk_dns_progress["should_stop"] = True
+        return jsonify({"status": "stopping"})
+    else:
+        return jsonify({"error": "No bulk DNS update in progress"}), 400
+
+@app.route('/api/resume-bulk-dns', methods=['POST'])
+@require_auth
+def resume_bulk_dns():
+    """Resume a paused bulk DNS update"""
+    global bulk_dns_progress
+
+    if bulk_dns_progress["status"] != "rate_limited":
+        return jsonify({"error": "No paused bulk DNS update to resume"}), 400
+
+    if bulk_dns_progress.get("paused_at_index") is None:
+        return jsonify({"error": "No resume point found"}), 400
+
+    try:
+        # Reset progress for resume
+        bulk_dns_progress["status"] = "running"
+        bulk_dns_progress["should_stop"] = False
+        bulk_dns_progress["rate_limit_message"] = None
+
+        print(f"🔄 Resuming bulk DNS update from index {bulk_dns_progress['paused_at_index']}")
+
+        # Start background thread to resume
+        dns_thread = threading.Thread(
+            target=background_bulk_dns_update,
+            args=(bulk_dns_progress["paused_domains"], bulk_dns_progress["record_data"], bulk_dns_progress["paused_at_index"])
+        )
+        dns_thread.daemon = True
+        dns_thread.start()
+
+        return jsonify({"status": "resumed", "message": "Bulk DNS update resumed successfully"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def background_bulk_dns_remove(domains, record_type, host_name, record_value=None, resume_from_index=None):
+    """Background function to handle bulk DNS record removal with rate limiting"""
+    global bulk_dns_remove_progress
+
+    try:
+        bulk_dns_remove_progress["status"] = "running"
+        start_index = resume_from_index if resume_from_index is not None else 0
+
+        print(f"🗑️ Starting bulk DNS removal for {len(domains)} domains from index {start_index}")
+        print(f"📝 Removing: {record_type} {host_name} {record_value if record_value else '(all values)'}")
+
+        # Process domains with rate limiting
+        for i, domain_name in enumerate(domains[start_index:], start_index + 1):
+            # Check if removal should stop
+            if bulk_dns_remove_progress["should_stop"]:
+                bulk_dns_remove_progress["status"] = "stopped"
+                bulk_dns_remove_progress["current_domain"] = ""
+                print(f"⏹ Bulk DNS removal stopped by user at domain {i}/{bulk_dns_remove_progress['total']}")
+                return
+
+            bulk_dns_remove_progress["processed"] = i
+            bulk_dns_remove_progress["current_domain"] = domain_name
+
+            print(f"🗑️ Processing DNS removal {i}/{bulk_dns_remove_progress['total']}: {domain_name}")
+
+            # Remove DNS record with retry logic for rate limits
+            dns_removed = False
+            dns_retry = 0
+            max_dns_retries = 3
+
+            while dns_retry < max_dns_retries and not dns_removed:
+                try:
+                    # Get current DNS records
+                    existing_hosts = get_email_manager().api_client._get_all_hosts(domain_name)
+
+                    if existing_hosts is None:
+                        raise Exception("Could not fetch existing DNS records")
+
+                    # Filter out records to remove
+                    filtered_hosts = []
+                    removed_count = 0
+
+                    for host in existing_hosts:
+                        should_remove = False
+
+                        # Check if this record matches removal criteria
+                        if host.get('Type') == record_type and host.get('Name') == host_name:
+                            if record_value:
+                                # Remove only if value matches
+                                if host.get('Address') == record_value:
+                                    should_remove = True
+                                    removed_count += 1
+                            else:
+                                # Remove all records matching type and host
+                                should_remove = True
+                                removed_count += 1
+
+                        if not should_remove:
+                            filtered_hosts.append(host)
+
+                    if removed_count == 0:
+                        print(f"  ℹ️ No matching records found for {domain_name}")
+                        bulk_dns_remove_progress["successful"] += 1
+                        dns_removed = True
+                        continue
+
+                    print(f"  🗑️ Removing {removed_count} DNS record(s) from {domain_name}")
+
+                    # Update DNS via setHosts API with remaining records
+                    domain_parts = domain_name.split('.')
+                    if len(domain_parts) < 2:
+                        raise Exception(f"Invalid domain format: {domain_name}")
+
+                    sld = domain_parts[0]
+                    tld = '.'.join(domain_parts[1:])
+
+                    # Handle common multi-part TLDs
+                    common_tlds = ['co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au']
+                    for common_tld in common_tlds:
+                        if domain_name.endswith('.' + common_tld):
+                            sld = domain_name.replace('.' + common_tld, '')
+                            tld = common_tld
+                            break
+
+                    # Build setHosts parameters with remaining records
+                    params = {'SLD': sld, 'TLD': tld}
+
+                    for idx, record in enumerate(filtered_hosts, 1):
+                        params[f'HostName{idx}'] = record['Name']
+                        params[f'RecordType{idx}'] = record['Type']
+                        params[f'Address{idx}'] = record['Address']
+                        params[f'TTL{idx}'] = record['TTL']
+                        if record.get('MXPref'):
+                            params[f'MXPref{idx}'] = record['MXPref']
+
+                    # Make API call
+                    response = get_email_manager().api_client._make_request('namecheap.domains.dns.setHosts', **params)
+
+                    # Check response
+                    command_response = None
+                    for key, value in response.items():
+                        if 'CommandResponse' in key:
+                            command_response = value
+                            break
+
+                    if command_response:
+                        hosts_result = None
+                        for key, value in command_response.items():
+                            if 'DomainDNSSetHostsResult' in key:
+                                hosts_result = value
+                                break
+
+                        if hosts_result and hosts_result.get('IsSuccess') == 'true':
+                            print(f"  ✅ DNS records removed from {domain_name}")
+                            bulk_dns_remove_progress["successful"] += 1
+                            dns_removed = True
+                        else:
+                            raise Exception(f"Namecheap API returned failure: {hosts_result}")
+                    else:
+                        raise Exception("Unexpected response format from Namecheap")
+
+                except Exception as dns_error:
+                    dns_retry += 1
+                    error_msg = str(dns_error)
+
+                    # Check for rate limiting indicators
+                    is_rate_limited = (
+                        "too many requests" in error_msg.lower() or
+                        "rate limit" in error_msg.lower() or
+                        "connection/timeout error" in error_msg.lower() or
+                        "502" in error_msg or "503" in error_msg or "504" in error_msg
+                    )
+
+                    if is_rate_limited:
+                        if dns_retry <= 2:  # Only retry twice, then pause
+                            wait_time = 5 * dns_retry
+                            print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            # Rate limit hit, pause the removal
+                            print(f"🚫 Rate limit detected at domain {domain_name}. Pausing DNS removal...")
+                            bulk_dns_remove_progress["status"] = "rate_limited"
+                            bulk_dns_remove_progress["current_domain"] = domain_name
+                            bulk_dns_remove_progress["paused_at_index"] = i - 1
+                            bulk_dns_remove_progress["paused_domains"] = domains
+                            bulk_dns_remove_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait and click Resume to continue."
+                            return
+                    else:
+                        print(f"  ⚠️ Error removing DNS from {domain_name}: {dns_error}")
+                        bulk_dns_remove_progress["errors"].append(f"{domain_name}: {str(dns_error)}")
+                        break
+
+            # Small delay between domains
+            time.sleep(1.5)
+
+        bulk_dns_remove_progress["status"] = "completed"
+        bulk_dns_remove_progress["current_domain"] = ""
+        print(f"✅ Bulk DNS removal completed: {bulk_dns_remove_progress['successful']} successful, {len(bulk_dns_remove_progress['errors'])} errors")
+
+    except Exception as e:
+        print(f"❌ Bulk DNS removal failed: {e}")
+        bulk_dns_remove_progress["status"] = "error"
+        bulk_dns_remove_progress["error"] = str(e)
+
+@app.route('/api/bulk-dns-remove', methods=['POST'])
+@require_auth
+def bulk_dns_remove():
+    """Start bulk DNS record removal"""
+    global bulk_dns_remove_progress
+
+    try:
+        data = request.get_json()
+        domains = data.get('domains', [])
+        record_type = data.get('record_type')
+        host_name = data.get('host_name')
+        record_value = data.get('record_value')
+
+        if not domains:
+            return jsonify({"error": "No domains provided"}), 400
+
+        if not record_type:
+            return jsonify({"error": "Record type is required"}), 400
+
+        if not host_name:
+            return jsonify({"error": "Host name is required"}), 400
+
+        # Check if removal is already running
+        if bulk_dns_remove_progress["status"] == "running":
+            return jsonify({"error": "Bulk DNS removal already in progress"}), 409
+
+        # Reset progress
+        bulk_dns_remove_progress = {
+            "status": "starting",
+            "processed": 0,
+            "total": len(domains),
+            "current_domain": "",
+            "successful": 0,
+            "errors": [],
+            "should_stop": False,
+            "paused_at_index": None,
+            "rate_limit_message": None,
+            "paused_domains": domains,
+            "remove_criteria": {
+                "type": record_type,
+                "host": host_name,
+                "value": record_value
+            }
+        }
+
+        # Start background removal
+        dns_thread = threading.Thread(
+            target=background_bulk_dns_remove,
+            args=(domains, record_type, host_name, record_value)
+        )
+        dns_thread.daemon = True
+        dns_thread.start()
+
+        return jsonify({
+            "status": "started",
+            "total": len(domains),
+            "record_type": record_type,
+            "host_name": host_name
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/bulk-dns-remove-progress', methods=['GET'])
+def get_bulk_dns_remove_progress():
+    """Get bulk DNS removal progress"""
+    return jsonify({
+        "status": bulk_dns_remove_progress["status"],
+        "processed": bulk_dns_remove_progress["processed"],
+        "total": bulk_dns_remove_progress["total"],
+        "current_domain": bulk_dns_remove_progress["current_domain"],
+        "successful": bulk_dns_remove_progress["successful"],
+        "errors": bulk_dns_remove_progress["errors"][-5:] if bulk_dns_remove_progress["errors"] else [],
+        "total_errors": len(bulk_dns_remove_progress["errors"]) if bulk_dns_remove_progress["errors"] else 0,
+        "rate_limit_message": bulk_dns_remove_progress.get("rate_limit_message"),
+        "paused_at_index": bulk_dns_remove_progress.get("paused_at_index")
+    })
+
+@app.route('/api/stop-bulk-dns-remove', methods=['POST'])
+@require_auth
+def stop_bulk_dns_remove():
+    """Stop bulk DNS removal"""
+    global bulk_dns_remove_progress
+
+    if bulk_dns_remove_progress["status"] == "running":
+        bulk_dns_remove_progress["should_stop"] = True
+        return jsonify({"status": "stopping"})
+    else:
+        return jsonify({"error": "No bulk DNS removal in progress"}), 400
+
+@app.route('/api/resume-bulk-dns-remove', methods=['POST'])
+@require_auth
+def resume_bulk_dns_remove():
+    """Resume a paused bulk DNS removal"""
+    global bulk_dns_remove_progress
+
+    if bulk_dns_remove_progress["status"] != "rate_limited":
+        return jsonify({"error": "No paused bulk DNS removal to resume"}), 400
+
+    if bulk_dns_remove_progress.get("paused_at_index") is None:
+        return jsonify({"error": "No resume point found"}), 400
+
+    try:
+        # Reset progress for resume
+        bulk_dns_remove_progress["status"] = "running"
+        bulk_dns_remove_progress["should_stop"] = False
+        bulk_dns_remove_progress["rate_limit_message"] = None
+
+        print(f"🔄 Resuming bulk DNS removal from index {bulk_dns_remove_progress['paused_at_index']}")
+
+        criteria = bulk_dns_remove_progress.get("remove_criteria", {})
+
+        # Start background thread to resume
+        dns_thread = threading.Thread(
+            target=background_bulk_dns_remove,
+            args=(
+                bulk_dns_remove_progress["paused_domains"],
+                criteria.get("type"),
+                criteria.get("host"),
+                criteria.get("value"),
+                bulk_dns_remove_progress["paused_at_index"]
+            )
+        )
+        dns_thread.daemon = True
+        dns_thread.start()
+
+        return jsonify({"status": "resumed", "message": "Bulk DNS removal resumed successfully"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

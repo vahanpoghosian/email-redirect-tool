@@ -2,8 +2,8 @@ services:
   - type: web
     name: email-redirect-tool
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    buildCommand: "chmod +x deploy_build.sh && ./deploy_build.sh"
+    startCommand: "chmod +x startup.sh && ./startup.sh"
     disk:
       name: email-redirect-data
       mountPath: /opt/render/project/data

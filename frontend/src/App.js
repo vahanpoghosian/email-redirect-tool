@@ -4,6 +4,7 @@ import DomainTable from './components/DomainTable';
 import SyncProgress from './components/SyncProgress';
 import BulkUpdateModal from './components/BulkUpdateModal';
 import ClientManager from './components/ClientManager';
+import DNSModal from './components/DNSModal';
 
 function App() {
   const [domains, setDomains] = useState([]);
@@ -13,6 +14,7 @@ function App() {
   const [selectedDomains, setSelectedDomains] = useState([]);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showClientManager, setShowClientManager] = useState(false);
+  const [showDNSModal, setShowDNSModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [bulkUpdateResults, setBulkUpdateResults] = useState({});
@@ -25,20 +27,43 @@ function App() {
 
   const loadDomainsAndClients = async () => {
     try {
+      // Try to load domains from main endpoint
       const [domainsRes, clientsRes] = await Promise.all([
         axios.get('/api/domains'),
         axios.get('/api/clients')
       ]);
 
       if (domainsRes.data.status === 'success') {
-        setDomains(domainsRes.data.domains);
+        setDomains(domainsRes.data.domains || []);
+        console.log('Loaded', domainsRes.data.domains?.length || 0, 'domains');
+      } else if (domainsRes.data.domains) {
+        // Fallback: if status is not success but we have domains
+        setDomains(domainsRes.data.domains || []);
       }
 
       if (clientsRes.data.status === 'success') {
-        setClients(clientsRes.data.clients);
+        setClients(clientsRes.data.clients || []);
       }
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading from /api/domains, trying database fallback:', error);
+
+      // If main endpoint fails, try database-only endpoint
+      try {
+        const dbRes = await axios.get('/api/domains-from-db');
+        if (dbRes.data.status === 'success') {
+          setDomains(dbRes.data.domains || []);
+          console.log('Loaded', dbRes.data.domains?.length || 0, 'domains from database');
+        }
+
+        // Also try to get clients again
+        const clientsRes = await axios.get('/api/clients');
+        if (clientsRes.data.status === 'success') {
+          setClients(clientsRes.data.clients || []);
+        }
+      } catch (dbError) {
+        console.error('Database fallback also failed:', dbError);
+        setDomains([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -273,7 +298,7 @@ function App() {
     <div>
       {/* Header */}
       <div className="header">
-        <div className="logo">🔗 Domain URL Redirections Manager</div>
+        <div className="logo">🔗 Domain URL Redirections Manager v2.1</div>
       </div>
 
       <div className="container">
@@ -327,6 +352,27 @@ function App() {
               onClick={() => setShowClientManager(true)}
             >
               👥 Manage Clients
+            </button>
+
+            <button
+              className="btn"
+              onClick={() => {
+                if (selectedDomains.length === 0) {
+                  alert('Please select at least one domain first');
+                  return;
+                }
+                setShowDNSModal(true);
+              }}
+              disabled={selectedDomains.length === 0}
+              style={{
+                background: selectedDomains.length === 0 ? '#94a3b8' : '#8b5cf6',
+                color: 'white',
+                cursor: selectedDomains.length === 0 ? 'not-allowed' : 'pointer',
+                border: '2px solid #7c3aed',
+                fontWeight: 'bold'
+              }}
+            >
+              🌐 DNS Records ({selectedDomains.length})
             </button>
 
             <button
@@ -416,13 +462,15 @@ function App() {
           />
         </div>
 
-        {/* Bulk Update Modal */}
+        {/* Bulk Update Modal with DNS Management */}
         {showBulkModal && (
           <BulkUpdateModal
             selectedDomains={selectedDomains}
             clients={clients}
-            onSubmit={handleBulkUpdate}
-            onClose={() => setShowBulkModal(false)}
+            onClose={() => {
+              setShowBulkModal(false);
+              loadDomainsAndClients();
+            }}
           />
         )}
 
@@ -432,6 +480,17 @@ function App() {
             clients={clients}
             onClose={() => {
               setShowClientManager(false);
+              loadDomainsAndClients();
+            }}
+          />
+        )}
+
+        {/* DNS Management Modal */}
+        {showDNSModal && (
+          <DNSModal
+            selectedDomains={selectedDomains}
+            onClose={() => {
+              setShowDNSModal(false);
               loadDomainsAndClients();
             }}
           />

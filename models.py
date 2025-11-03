@@ -446,6 +446,7 @@ class Database:
     def update_redirect_in_backup(self, domain_name: str, redirect_name: str, new_target: str) -> List[Dict]:
         """
         Update a URL redirect in the DNS backup and return complete record set
+        This also removes any existing parking page records (CNAME, A records) for the same name
 
         Args:
             domain_name: The domain to update
@@ -458,20 +459,40 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Update the redirect record in backup
+            # STEP 1: Remove any existing parking page records for this name
+            # This includes CNAME records pointing to parking services like parkingpage.namecheap.com
+            parking_indicators = [
+                'parkingpage.namecheap.com', 'parking', 'namecheap'
+            ]
+
+            # Delete any records for this name that might be parking pages
+            cursor.execute('''
+                DELETE FROM dns_records
+                WHERE domain_name = ? AND record_name = ? AND is_current = TRUE
+                AND (record_type IN ('CNAME', 'A') OR record_address LIKE '%parking%' OR record_address LIKE '%parkingpage.namecheap.com%')
+            ''', (domain_name, redirect_name))
+
+            removed_count = cursor.rowcount
+            if removed_count > 0:
+                print(f"🗑️  Removed {removed_count} parking page record(s) for {redirect_name}")
+
+            # STEP 2: Update existing URL redirect record if it exists
             cursor.execute('''
                 UPDATE dns_records
                 SET record_address = ?, backup_timestamp = CURRENT_TIMESTAMP
                 WHERE domain_name = ? AND record_name = ? AND record_type = 'URL' AND is_current = TRUE
             ''', (new_target, domain_name, redirect_name))
 
-            # If no records were updated, insert new redirect
+            # STEP 3: If no URL redirect was updated, insert new redirect
             if cursor.rowcount == 0:
                 cursor.execute('''
                     INSERT INTO dns_records
                     (domain_name, record_name, record_type, record_address, ttl, is_url_redirect, is_current)
                     VALUES (?, ?, 'URL', ?, '300', TRUE, TRUE)
                 ''', (domain_name, redirect_name, new_target))
+                print(f"➕ Added new URL redirect: {redirect_name} -> {new_target}")
+            else:
+                print(f"✏️  Updated URL redirect: {redirect_name} -> {new_target}")
 
             conn.commit()
 
