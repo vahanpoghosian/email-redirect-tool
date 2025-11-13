@@ -913,6 +913,14 @@ class NamecheapAPIClient:
             if hosts is None:
                 return ["Failed to fetch DNS records"]
 
+            # Debug: Print all records for analysis
+            print(f"🔍 DEBUG: DNS records for {domain_name}:")
+            for host in hosts:
+                host_type = host.get('Type', '')
+                host_name = host.get('Name', '')
+                host_value = host.get('Address', '')
+                print(f"  {host_type}: {host_name} -> {host_value}")
+
             # Check for various record types
             has_google_verification = False
             has_spf = False
@@ -927,22 +935,31 @@ class NamecheapAPIClient:
 
                 # Check TXT records
                 if host_type == 'TXT':
-                    if host_name == '@':
-                        if 'google-site-verification=' in host_value:
-                            has_google_verification = True
-                        if host_value.startswith('v=spf1'):
-                            has_spf = True
-                    elif host_name == '_dmarc':
-                        if host_value.startswith('v=dmarc1'):
-                            has_dmarc = True
-                    elif 'domainkey' in host_name:
-                        if 'v=dkim1' in host_value or 'p=' in host_value:
-                            has_dkim = True
+                    # Google site verification can be at @ or any subdomain
+                    if 'google-site-verification=' in host_value:
+                        has_google_verification = True
+                        print(f"  ✅ Found Google verification: {host_name}")
+
+                    # SPF record at root domain
+                    if host_name == '@' and host_value.startswith('v=spf1'):
+                        has_spf = True
+                        print(f"  ✅ Found SPF record")
+
+                    # DMARC record at _dmarc subdomain (case insensitive)
+                    elif host_name == '_dmarc' and (host_value.startswith('v=dmarc1') or host_value.startswith('v=DMARC1')):
+                        has_dmarc = True
+                        print(f"  ✅ Found DMARC record")
+
+                    # DKIM records (various selectors)
+                    elif ('domainkey' in host_name or 'dkim' in host_name) and ('v=dkim1' in host_value or 'p=' in host_value):
+                        has_dkim = True
+                        print(f"  ✅ Found DKIM record: {host_name}")
 
                 # Check URL redirects
                 elif host_type == 'URL':
                     if host_name in ['@', 'www']:
                         has_redirect = True
+                        print(f"  ✅ Found URL redirect: {host_name} -> {host.get('Address', '')}")
 
             # Compile missing records
             if not has_google_verification:
@@ -955,6 +972,12 @@ class NamecheapAPIClient:
                 issues.append("DKIM")
             if not has_redirect:
                 issues.append("URL redirect")
+
+            print(f"🔍 DNS analysis for {domain_name}: {len(issues)} issues found")
+            if issues:
+                print(f"  Missing: {', '.join(issues)}")
+            else:
+                print(f"  ✅ All critical records present")
 
             return issues
 
