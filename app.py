@@ -1938,11 +1938,20 @@ def background_sync_with_rate_limiting(resume_from_index=None):
                         
                         if redirections:
                             db.update_redirections(domain_name, redirections)
-                            db.update_domain_sync_status(domain_name, 'synced')
                             print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
                         else:
-                            db.update_domain_sync_status(domain_name, 'synced')
                             print(f"  ℹ️ No redirections found for {domain_name}")
+
+                        # Check for DNS issues
+                        dns_issues = get_email_manager().api_client.check_dns_issues(domain_name)
+                        if dns_issues:
+                            issues_text = ", ".join(dns_issues)
+                            db.update_domain_issues(domain_name, f"Missing: {issues_text}")
+                            print(f"  ⚠️ DNS issues for {domain_name}: Missing {issues_text}")
+                        else:
+                            db.update_domain_issues(domain_name, None)
+
+                        db.update_domain_sync_status(domain_name, 'synced')
                             
                     except Exception as redirect_error:
                         redirect_retry += 1
@@ -2388,11 +2397,21 @@ def background_sync_selected_domains(selected_domains, resume_from_index=None):
                             # Update domain redirections
                             db.add_or_update_domain(domain_name)
                             db.update_redirections(domain_name, redirections)
+
+                            # Check for DNS issues
+                            dns_issues = get_email_manager().api_client.check_dns_issues(domain_name)
+                            if dns_issues:
+                                issues_text = ", ".join(dns_issues)
+                                db.update_domain_issues(domain_name, f"Missing: {issues_text}")
+                            else:
+                                db.update_domain_issues(domain_name, None)
+
                             db.update_domain_sync_status(domain_name, 'synced')
                             sync_progress["domains_updated"] += 1
                             synced = True
                         else:
                             db.update_domain_sync_status(domain_name, 'not_synced')
+                            db.update_domain_issues(domain_name, "Failed to sync")
 
                     except Exception as e:
                         retry += 1

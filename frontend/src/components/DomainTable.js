@@ -151,10 +151,11 @@ const DomainTable = ({
             />
           </th>
           <th style={{ width: '5%' }}>#</th>
-          <th style={{ width: '25%' }}>Domain</th>
-          <th style={{ width: '35%' }}>Redirect Target</th>
+          <th style={{ width: '20%' }}>Domain</th>
+          <th style={{ width: '25%' }}>Redirect Target</th>
           <th style={{ width: '15%' }}>Client</th>
-          <th style={{ width: '15%' }}>Status</th>
+          <th style={{ width: '10%' }}>Status</th>
+          <th style={{ width: '20%' }}>Issues</th>
         </tr>
       </thead>
       <tbody>
@@ -208,6 +209,17 @@ const DomainTable = ({
             </td>
             <td>
               {getStatusDisplay(domain.domain_name)}
+            </td>
+            <td style={{ fontSize: '0.9em' }}>
+              {domain.issues ? (
+                <span style={{ color: '#ef4444' }}>
+                  ⚠️ {domain.issues}
+                </span>
+              ) : (
+                <span style={{ color: '#10b981' }}>
+                  ✓ All OK
+                </span>
+              )}
             </td>
           </tr>
         ))}

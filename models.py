@@ -78,6 +78,13 @@ class Database:
             except sqlite3.OperationalError:
                 # Column already exists
                 pass
+
+            # Add issues column if it doesn't exist (for tracking missing records)
+            try:
+                cursor.execute('ALTER TABLE domains ADD COLUMN issues TEXT')
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
             
             # Users table for authentication
             cursor.execute('''
@@ -222,10 +229,10 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT 
-                    d.id, d.domain_number, d.domain_name, 
+                SELECT
+                    d.id, d.domain_number, d.domain_name,
                     c.client_name, c.id as client_id,
-                    d.updated_at, d.sync_status
+                    d.updated_at, d.sync_status, d.issues
                 FROM domains d
                 LEFT JOIN clients c ON d.client_id = c.id
                 ORDER BY d.domain_number
@@ -233,7 +240,7 @@ class Database:
             
             domains = []
             for row in cursor.fetchall():
-                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status = row
+                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status, issues = row
                 
                 # Get redirections
                 cursor.execute('''
@@ -273,7 +280,8 @@ class Database:
                     'client_id': auto_detected_client_id,
                     'redirections': redirections,
                     'updated_at': updated_at,
-                    'sync_status': sync_status or 'unchanged'
+                    'sync_status': sync_status or 'unchanged',
+                    'issues': issues
                 })
             
             return domains
@@ -358,6 +366,15 @@ class Database:
                 UPDATE domains SET sync_status = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE domain_name = ?
             ''', (status, domain_name))
+
+    def update_domain_issues(self, domain_name: str, issues: str = None):
+        """Update issues for a domain"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE domains SET issues = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE domain_name = ?
+            ''', (issues, domain_name))
 
     # DNS Backup and Restore Methods
     def backup_dns_records(self, domain_name: str, dns_records: List[Dict]) -> bool:

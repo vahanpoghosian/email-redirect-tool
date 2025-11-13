@@ -893,6 +893,75 @@ class NamecheapAPIClient:
             print(f"Error getting all hosts for {domain}: {e}")
             return []
 
+    def check_dns_issues(self, domain_name: str) -> List[str]:
+        """
+        Check for missing DNS records and return list of issues
+
+        Checks for:
+        - Google site verification (TXT record starting with google-site-verification=)
+        - SPF record (TXT record with v=spf1)
+        - DMARC record (TXT record at _dmarc with v=DMARC1)
+        - DKIM record (TXT record at google._domainkey or selector1._domainkey)
+        - URL redirect (URL record at @ or www)
+        """
+        issues = []
+
+        try:
+            # Get all DNS records for the domain
+            hosts = self._get_all_hosts(domain_name)
+
+            if hosts is None:
+                return ["Failed to fetch DNS records"]
+
+            # Check for various record types
+            has_google_verification = False
+            has_spf = False
+            has_dmarc = False
+            has_dkim = False
+            has_redirect = False
+
+            for host in hosts:
+                host_type = host.get('Type', '').upper()
+                host_name = host.get('Name', '').lower()
+                host_value = host.get('Address', '').lower()
+
+                # Check TXT records
+                if host_type == 'TXT':
+                    if host_name == '@':
+                        if 'google-site-verification=' in host_value:
+                            has_google_verification = True
+                        if host_value.startswith('v=spf1'):
+                            has_spf = True
+                    elif host_name == '_dmarc':
+                        if host_value.startswith('v=dmarc1'):
+                            has_dmarc = True
+                    elif 'domainkey' in host_name:
+                        if 'v=dkim1' in host_value or 'p=' in host_value:
+                            has_dkim = True
+
+                # Check URL redirects
+                elif host_type == 'URL':
+                    if host_name in ['@', 'www']:
+                        has_redirect = True
+
+            # Compile missing records
+            if not has_google_verification:
+                issues.append("Google verification")
+            if not has_spf:
+                issues.append("SPF record")
+            if not has_dmarc:
+                issues.append("DMARC")
+            if not has_dkim:
+                issues.append("DKIM")
+            if not has_redirect:
+                issues.append("URL redirect")
+
+            return issues
+
+        except Exception as e:
+            print(f"Error checking DNS issues for {domain_name}: {e}")
+            return ["Error checking DNS"]
+
 class EmailRedirectionManager:
     """Manager for bulk email redirection operations"""
     
