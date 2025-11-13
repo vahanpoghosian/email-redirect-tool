@@ -1966,21 +1966,14 @@ def background_sync_with_rate_limiting(resume_from_index=None):
                         )
                         
                         if is_rate_limited:
-                            if redirect_retry <= 2:  # Only retry twice, then pause
-                                # Short wait times for initial retries: 5s, 10s
-                                wait_time = 5 * redirect_retry
-                                print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {redirect_retry}/{max_redirect_retries})")
-                                time.sleep(wait_time)
-                                continue
-                            else:
-                                # Rate limit hit, pause the sync
-                                print(f"🚫 Rate limit detected at domain {domain_name}. Pausing sync...")
-                                sync_progress["status"] = "rate_limited"
-                                sync_progress["current_domain"] = domain_name
-                                sync_progress["paused_at_index"] = i - 1  # Index where we need to resume (0-based)
-                                sync_progress["paused_domains"] = namecheap_domains  # Store the domain list for resume
-                                sync_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait a few minutes and click Resume to continue."
-                                return  # Exit the sync function
+                            # Immediately pause on rate limit - no retries
+                            print(f"🚫 Rate limit detected at domain {domain_name}. Pausing sync...")
+                            sync_progress["status"] = "rate_limited"
+                            sync_progress["current_domain"] = domain_name
+                            sync_progress["paused_at_index"] = i - 1  # Index where we need to resume (0-based)
+                            sync_progress["paused_domains"] = namecheap_domains  # Store the domain list for resume
+                            sync_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait a few minutes and click Resume to continue."
+                            return  # Exit the sync function
                         else:
                             print(f"  ⚠️ Error getting redirections for {domain_name}: {redirect_error}")
                             db.update_domain_sync_status(domain_name, 'not_synced')
@@ -2414,7 +2407,6 @@ def background_sync_selected_domains(selected_domains, resume_from_index=None):
                             db.update_domain_issues(domain_name, "Failed to sync")
 
                     except Exception as e:
-                        retry += 1
                         error_msg = str(e)
 
                         # Check for various rate limiting indicators
@@ -2426,24 +2418,25 @@ def background_sync_selected_domains(selected_domains, resume_from_index=None):
                         )
 
                         if is_rate_limited:
-                            if retry <= 2:  # Only retry twice, then pause
-                                wait_time = 5 * retry
-                                print(f"  ⏳ Rate limited for {domain_name}, waiting {wait_time}s (attempt {retry}/{max_retries})")
+                            # Immediately pause on rate limit - no retries
+                            print(f"🚫 Rate limit detected at domain {domain_name}. Pausing sync...")
+                            sync_progress["status"] = "rate_limited"
+                            sync_progress["current_domain"] = domain_name
+                            sync_progress["paused_at_index"] = i - 1  # Index where we need to resume (0-based)
+                            sync_progress["paused_domains"] = selected_domains
+                            sync_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait a few minutes and click Resume to continue."
+                            return  # Exit the sync function
+                        else:
+                            retry += 1
+                            if retry < max_retries:
+                                wait_time = 2 * retry
+                                print(f"  ⏳ Error for {domain_name}, waiting {wait_time}s (attempt {retry}/{max_retries}): {error_msg}")
                                 time.sleep(wait_time)
                                 continue
                             else:
-                                # Rate limit hit, pause the sync
-                                print(f"🚫 Rate limit detected at domain {domain_name}. Pausing sync...")
-                                sync_progress["status"] = "rate_limited"
-                                sync_progress["current_domain"] = domain_name
-                                sync_progress["paused_at_index"] = i - 1  # Index where we need to resume (0-based)
-                                sync_progress["paused_domains"] = selected_domains
-                                sync_progress["rate_limit_message"] = f"Namecheap rate limit exceeded at domain {domain_name}. Please wait a few minutes and click Resume to continue."
-                                return  # Exit the sync function
-                        else:
-                            sync_progress["errors"].append(f"{domain_name}: {str(e)}")
-                            db.update_domain_sync_status(domain_name, 'not_synced')
-                            break
+                                sync_progress["errors"].append(f"{domain_name}: {str(e)}")
+                                db.update_domain_sync_status(domain_name, 'not_synced')
+                                break
 
                 # Add delay between domains
                 if i < len(selected_domains):
