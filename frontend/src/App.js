@@ -163,6 +163,37 @@ function App() {
     }
   };
 
+  const exportToCSV = () => {
+    const headers = ['#', 'Domain', 'Redirect Target', 'Client', 'Status', 'Issues'];
+    const csvContent = [
+      headers.join(','),
+      ...filteredDomains.map(domain => {
+        const client = clients.find(c => c.id === domain.client_id);
+        const status = domain.redirect_url ? 'Active' : 'Not Set';
+        const issues = domain.issues || 'All OK';
+
+        return [
+          domain.domain_number || 'N/A',
+          domain.domain_name,
+          `"${domain.redirect_url || ''}"`,
+          `"${client ? client.name : 'Unassigned'}"`,
+          status,
+          `"${issues}"`
+        ].join(',');
+      })
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `domains-export-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleSaveRedirect = async (domainName, redirectUrl) => {
     try {
       const response = await axios.post('/update-redirect', {
@@ -373,6 +404,19 @@ function App() {
               }}
             >
               🌐 DNS Records ({selectedDomains.length})
+            </button>
+
+            <button
+              className="btn"
+              onClick={exportToCSV}
+              style={{
+                background: '#059669',
+                color: 'white',
+                border: '2px solid #047857',
+                fontWeight: 'bold'
+              }}
+            >
+              📊 Export CSV ({filteredDomains.length})
             </button>
 
             <button
