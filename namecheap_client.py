@@ -911,7 +911,7 @@ class NamecheapAPIClient:
 
             return []
 
-    def check_dns_issues(self, domain_name: str) -> List[str]:
+    def check_dns_issues(self, domain_name: str, hosts=None) -> List[str]:
         """
         Check for missing DNS records and return list of issues
 
@@ -925,11 +925,13 @@ class NamecheapAPIClient:
         issues = []
 
         try:
-            # Get all DNS records for the domain
-            hosts = self._get_all_hosts(domain_name)
-
+            # Use provided hosts or fetch DNS records for the domain
             if hosts is None:
-                return ["Failed to fetch DNS records"]
+                hosts = self._get_all_hosts(domain_name)
+                if hosts is None:
+                    return ["Failed to fetch DNS records"]
+            else:
+                print(f"🔍 DEBUG: Using cached DNS records for {domain_name} (avoiding duplicate API call)")
 
             # Debug: Print all records for analysis
             print(f"🔍 DEBUG: DNS records for {domain_name}:")
