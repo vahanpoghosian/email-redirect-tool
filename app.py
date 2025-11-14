@@ -1,6 +1,7 @@
 """
 Email Redirection Tool - Flask Application
 View existing email forwarding for Namecheap domains
+OPTIMIZATION: Single DNS API call per domain (Nov 14, 2025)
 """
 
 from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_from_directory, flash, get_flashed_messages
@@ -1933,23 +1934,37 @@ def background_sync_with_rate_limiting(resume_from_index=None):
                 
                 while redirect_retry < max_redirect_retries and not redirections_fetched:
                     try:
-                        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+                        # Get DNS hosts once for both redirections and issue checking
+                        hosts = get_email_manager().api_client._get_all_hosts(domain_name)
                         redirections_fetched = True
-                        
-                        if redirections:
-                            db.update_redirections(domain_name, redirections)
-                            print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
-                        else:
-                            print(f"  ℹ️ No redirections found for {domain_name}")
 
-                        # Check for DNS issues
-                        dns_issues = get_email_manager().api_client.check_dns_issues(domain_name)
-                        if dns_issues:
-                            issues_text = ", ".join(dns_issues)
-                            db.update_domain_issues(domain_name, f"Missing: {issues_text}")
-                            print(f"  ⚠️ DNS issues for {domain_name}: Missing {issues_text}")
+                        if hosts:
+                            # Extract redirections from hosts
+                            redirections = []
+                            for host in hosts:
+                                if host.get('Type', '').upper() == 'URL':
+                                    redirections.append({
+                                        'source': host.get('Name', ''),
+                                        'target': host.get('Address', ''),
+                                        'type': 'URL'
+                                    })
+
+                            if redirections:
+                                db.update_redirections(domain_name, redirections)
+                                print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
+                            else:
+                                print(f"  ℹ️ No redirections found for {domain_name}")
+
+                            # Check for DNS issues using the same hosts data
+                            dns_issues = get_email_manager().api_client.check_dns_issues(domain_name, hosts)
+                            if dns_issues:
+                                issues_text = ", ".join(dns_issues)
+                                db.update_domain_issues(domain_name, f"Missing: {issues_text}")
+                                print(f"  ⚠️ DNS issues for {domain_name}: Missing {issues_text}")
+                            else:
+                                db.update_domain_issues(domain_name, None)
                         else:
-                            db.update_domain_issues(domain_name, None)
+                            print(f"  ℹ️ No DNS records found for {domain_name}")
 
                         db.update_domain_sync_status(domain_name, 'synced')
                             
@@ -2383,16 +2398,26 @@ def background_sync_selected_domains(selected_domains, resume_from_index=None):
 
                 while retry < max_retries and not synced:
                     try:
-                        # Get redirections for this domain
-                        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+                        # Get DNS hosts once for both redirections and issue checking
+                        hosts = get_email_manager().api_client._get_all_hosts(domain_name)
 
-                        if redirections is not None:
+                        if hosts is not None:
+                            # Extract redirections from hosts
+                            redirections = []
+                            for host in hosts:
+                                if host.get('Type', '').upper() == 'URL':
+                                    redirections.append({
+                                        'source': host.get('Name', ''),
+                                        'target': host.get('Address', ''),
+                                        'type': 'URL'
+                                    })
+
                             # Update domain redirections
                             db.add_or_update_domain(domain_name)
                             db.update_redirections(domain_name, redirections)
 
-                            # Check for DNS issues
-                            dns_issues = get_email_manager().api_client.check_dns_issues(domain_name)
+                            # Check for DNS issues using the same hosts data
+                            dns_issues = get_email_manager().api_client.check_dns_issues(domain_name, hosts)
                             if dns_issues:
                                 issues_text = ", ".join(dns_issues)
                                 db.update_domain_issues(domain_name, f"Missing: {issues_text}")
