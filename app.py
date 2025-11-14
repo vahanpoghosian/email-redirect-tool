@@ -1956,13 +1956,19 @@ def background_sync_with_rate_limiting(resume_from_index=None):
                                 print(f"  ℹ️ No redirections found for {domain_name}")
 
                             # Check for DNS issues using the same hosts data
-                            dns_issues = get_email_manager().api_client.check_dns_issues(domain_name, hosts)
-                            if dns_issues:
-                                issues_text = ", ".join(dns_issues)
-                                db.update_domain_issues(domain_name, f"Missing: {issues_text}")
-                                print(f"  ⚠️ DNS issues for {domain_name}: Missing {issues_text}")
-                            else:
-                                db.update_domain_issues(domain_name, None)
+                            try:
+                                dns_issues = get_email_manager().api_client.check_dns_issues(domain_name, hosts)
+                                if dns_issues:
+                                    issues_text = ", ".join(dns_issues)
+                                    db.update_domain_issues(domain_name, f"Missing: {issues_text}")
+                                    print(f"  ⚠️ DNS issues for {domain_name}: Missing {issues_text}")
+                                    print(f"  📝 Updated database with issues: Missing: {issues_text}")
+                                else:
+                                    db.update_domain_issues(domain_name, None)
+                                    print(f"  ✅ No DNS issues found for {domain_name}, database updated")
+                            except Exception as dns_check_error:
+                                print(f"  ❌ Error checking DNS issues for {domain_name}: {dns_check_error}")
+                                db.update_domain_issues(domain_name, "Error checking DNS")
                         else:
                             print(f"  ℹ️ No DNS records found for {domain_name}")
 
@@ -2417,12 +2423,18 @@ def background_sync_selected_domains(selected_domains, resume_from_index=None):
                             db.update_redirections(domain_name, redirections)
 
                             # Check for DNS issues using the same hosts data
-                            dns_issues = get_email_manager().api_client.check_dns_issues(domain_name, hosts)
-                            if dns_issues:
-                                issues_text = ", ".join(dns_issues)
-                                db.update_domain_issues(domain_name, f"Missing: {issues_text}")
-                            else:
-                                db.update_domain_issues(domain_name, None)
+                            try:
+                                dns_issues = get_email_manager().api_client.check_dns_issues(domain_name, hosts)
+                                if dns_issues:
+                                    issues_text = ", ".join(dns_issues)
+                                    db.update_domain_issues(domain_name, f"Missing: {issues_text}")
+                                    print(f"  📝 Updated database with issues: Missing: {issues_text}")
+                                else:
+                                    db.update_domain_issues(domain_name, None)
+                                    print(f"  ✅ No DNS issues found for {domain_name}, database updated")
+                            except Exception as dns_check_error:
+                                print(f"  ❌ Error checking DNS issues for {domain_name}: {dns_check_error}")
+                                db.update_domain_issues(domain_name, "Error checking DNS")
 
                             db.update_domain_sync_status(domain_name, 'synced')
                             sync_progress["domains_updated"] += 1
