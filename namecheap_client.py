@@ -911,9 +911,10 @@ class NamecheapAPIClient:
 
             return []
 
-    def check_dns_issues(self, domain_name: str, hosts=None) -> List[str]:
+    def check_dns_issues(self, domain_name, hosts=None):
         """
         Check for missing DNS records and return list of issues
+        FIXED: Method signature updated Nov 14, 2025
 
         Checks for:
         - Google site verification (TXT record starting with google-site-verification=)
