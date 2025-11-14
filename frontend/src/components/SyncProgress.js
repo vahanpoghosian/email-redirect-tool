@@ -145,6 +145,8 @@ const SyncProgress = ({ onComplete }) => {
                 onClick={async () => {
                   try {
                     await axios.post('/api/resume-sync');
+                    // Reload the page to restart polling
+                    window.location.reload();
                   } catch (error) {
                     alert('Failed to resume sync: ' + error.message);
                   }

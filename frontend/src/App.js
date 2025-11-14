@@ -72,7 +72,7 @@ function App() {
   const checkSyncStatus = async () => {
     try {
       const response = await axios.get('/api/sync-domains-progress');
-      if (response.data.status === 'running') {
+      if (response.data.status === 'running' || response.data.status === 'rate_limited') {
         setSyncInProgress(true);
       }
     } catch (error) {
