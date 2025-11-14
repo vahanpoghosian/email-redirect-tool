@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const SyncProgress = ({ onComplete }) => {
+const SyncProgress = ({ onComplete, onRefreshDomains }) => {
   const [progress, setProgress] = useState({
     status: 'running',
     processed: 0,
@@ -13,12 +13,21 @@ const SyncProgress = ({ onComplete }) => {
   });
 
   useEffect(() => {
+    let syncCounter = 0;
     const interval = setInterval(async () => {
       try {
         const response = await axios.get('/api/sync-domains-progress');
         const data = response.data;
 
         setProgress(data);
+
+        // Refresh domain data every 5 seconds during sync to show real-time Issues updates
+        if (onRefreshDomains && data.status === 'running') {
+          syncCounter++;
+          if (syncCounter % 5 === 0) { // Every 5 seconds
+            onRefreshDomains();
+          }
+        }
 
         if (data.status === 'completed' || data.status === 'error' || data.status === 'stopped') {
           clearInterval(interval);
@@ -34,7 +43,7 @@ const SyncProgress = ({ onComplete }) => {
     }, 1000); // Poll every second
 
     return () => clearInterval(interval);
-  }, [onComplete]);
+  }, [onComplete, onRefreshDomains]);
 
   const getProgressPercentage = () => {
     if (progress.total === 0) return 0;

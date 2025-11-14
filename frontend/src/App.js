@@ -484,6 +484,7 @@ function App() {
               setSyncInProgress(false);
               loadDomainsAndClients();
             }}
+            onRefreshDomains={loadDomainsAndClients}
           />
         )}
 
