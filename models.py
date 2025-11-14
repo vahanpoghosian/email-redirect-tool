@@ -285,7 +285,16 @@ class Database:
                 })
             
             return domains
-    
+
+    def update_domain_issues(self, domain_name: str, issues: str = None):
+        """Update DNS issues for a domain"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE domains SET issues = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE domain_name = ?
+            ''', (issues, domain_name))
+
     def get_all_clients(self) -> List[Dict]:
         """Get all clients"""
         with self.get_connection() as conn:
