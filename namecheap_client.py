@@ -461,7 +461,16 @@ class NamecheapAPIClient:
             return redirections
             
         except Exception as e:
+            error_msg = str(e)
             print(f"Error getting domain redirections for {domain}: {e}")
+
+            # Check for rate limiting and re-raise the exception
+            if ("too many requests" in error_msg.lower() or
+                "rate limit" in error_msg.lower() or
+                "502" in error_msg or "503" in error_msg or "504" in error_msg):
+                # Re-raise rate limit errors so they bubble up to sync
+                raise e
+
             return []
     
     def set_email_forwarding(self, domain: str, forwarding_rules: List[Dict]) -> bool:
@@ -890,7 +899,16 @@ class NamecheapAPIClient:
             return normalized_hosts
             
         except Exception as e:
+            error_msg = str(e)
             print(f"Error getting all hosts for {domain}: {e}")
+
+            # Check for rate limiting and re-raise the exception
+            if ("too many requests" in error_msg.lower() or
+                "rate limit" in error_msg.lower() or
+                "502" in error_msg or "503" in error_msg or "504" in error_msg):
+                # Re-raise rate limit errors so they bubble up to sync
+                raise e
+
             return []
 
     def check_dns_issues(self, domain_name: str) -> List[str]:
@@ -982,7 +1000,16 @@ class NamecheapAPIClient:
             return issues
 
         except Exception as e:
+            error_msg = str(e)
             print(f"Error checking DNS issues for {domain_name}: {e}")
+
+            # Check for rate limiting and re-raise the exception to trigger pause
+            if ("too many requests" in error_msg.lower() or
+                "rate limit" in error_msg.lower() or
+                "502" in error_msg or "503" in error_msg or "504" in error_msg):
+                # Re-raise rate limit errors so sync can catch and pause
+                raise e
+
             return ["Error checking DNS"]
 
 class EmailRedirectionManager:
