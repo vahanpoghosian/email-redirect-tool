@@ -4092,6 +4092,56 @@ def resume_bulk_dns_remove():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/check-dns-for-domain/<domain_name>', methods=['POST'])
+def check_dns_for_domain(domain_name):
+    """Check stored DNS records for a domain and update DNS issues column"""
+    try:
+        db = Database()
+        issues = db.check_dns_records_for_domain(domain_name)
+        db.update_domain_dns_issues(domain_name, issues)
+
+        return jsonify({
+            "status": "success",
+            "domain": domain_name,
+            "dns_issues": issues
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/check-dns-for-selected', methods=['POST'])
+def check_dns_for_selected():
+    """Check stored DNS records for selected domains"""
+    try:
+        data = request.json
+        domains = data.get('domains', [])
+
+        if not domains:
+            return jsonify({"error": "No domains provided"}), 400
+
+        db = Database()
+        results = {}
+
+        for domain_name in domains:
+            try:
+                issues = db.check_dns_records_for_domain(domain_name)
+                db.update_domain_dns_issues(domain_name, issues)
+                results[domain_name] = {
+                    "success": True,
+                    "dns_issues": issues
+                }
+            except Exception as e:
+                results[domain_name] = {
+                    "success": False,
+                    "error": str(e)
+                }
+
+        return jsonify({
+            "status": "success",
+            "results": results
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV', 'production') == 'development'

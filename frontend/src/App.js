@@ -18,6 +18,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [bulkUpdateResults, setBulkUpdateResults] = useState({});
+  const [dnsCheckInProgress, setDnsCheckInProgress] = useState(false);
 
   // Load initial data
   useEffect(() => {
@@ -278,6 +279,35 @@ function App() {
     }
   };
 
+  const checkDnsForSelected = async () => {
+    try {
+      if (selectedDomains.length === 0) {
+        alert('Please select domains to check DNS records');
+        return;
+      }
+
+      setDnsCheckInProgress(true);
+      const response = await axios.post('/api/check-dns-for-selected', {
+        domains: selectedDomains
+      });
+
+      if (response.data.status === 'success') {
+        alert(`DNS check completed for ${selectedDomains.length} domains`);
+
+        // Refresh domains to show updated DNS status
+        await loadDomainsAndClients();
+        setSelectedDomains([]);
+      } else {
+        alert('Error checking DNS records: ' + (response.data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error checking DNS records:', error);
+      alert('Error checking DNS records: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setDnsCheckInProgress(false);
+    }
+  };
+
   const filteredDomains = domains.filter(domain => {
     const matchesSearch = domain.domain_name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesClient = !clientFilter || domain.client_id === parseInt(clientFilter);
@@ -352,6 +382,14 @@ function App() {
               onClick={() => setShowClientManager(true)}
             >
               👥 Manage Clients
+            </button>
+
+            <button
+              className="btn"
+              onClick={checkDnsForSelected}
+              disabled={selectedDomains.length === 0 || dnsCheckInProgress}
+            >
+              {dnsCheckInProgress ? '🔍 Checking...' : `🔍 Check DNS (${selectedDomains.length})`}
             </button>
 
             <button

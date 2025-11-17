@@ -78,7 +78,14 @@ class Database:
             except sqlite3.OperationalError:
                 # Column already exists
                 pass
-            
+
+            # Add dns_issues column if it doesn't exist (for DNS validation)
+            try:
+                cursor.execute('ALTER TABLE domains ADD COLUMN dns_issues TEXT')
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+
             # Users table for authentication
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -222,18 +229,18 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT 
-                    d.id, d.domain_number, d.domain_name, 
+                SELECT
+                    d.id, d.domain_number, d.domain_name,
                     c.client_name, c.id as client_id,
-                    d.updated_at, d.sync_status
+                    d.updated_at, d.sync_status, d.dns_issues
                 FROM domains d
                 LEFT JOIN clients c ON d.client_id = c.id
                 ORDER BY d.domain_number
             ''')
-            
+
             domains = []
             for row in cursor.fetchall():
-                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status = row
+                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status, dns_issues = row
                 
                 # Get redirections
                 cursor.execute('''
@@ -273,7 +280,8 @@ class Database:
                     'client_id': auto_detected_client_id,
                     'redirections': redirections,
                     'updated_at': updated_at,
-                    'sync_status': sync_status or 'unchanged'
+                    'sync_status': sync_status or 'unchanged',
+                    'dns_issues': dns_issues
                 })
             
             return domains
@@ -358,6 +366,87 @@ class Database:
                 UPDATE domains SET sync_status = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE domain_name = ?
             ''', (status, domain_name))
+
+    def update_domain_dns_issues(self, domain_name: str, issues: str):
+        """Update DNS issues for a domain"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE domains SET dns_issues = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE domain_name = ?
+            ''', (issues, domain_name))
+
+    def check_dns_records_for_domain(self, domain_name: str) -> str:
+        """
+        Check stored DNS records for a domain and return issues or 'ok'
+
+        Checks for:
+        - SPF: TXT record containing "v=spf1"
+        - Google verification: TXT record containing "google-site-verification"
+        - DMARC: Record with hostname "_dmarc"
+        - DKIM: Record containing "v=DKIM1;"
+
+        Returns:
+            'ok' if all records found, otherwise string describing missing records
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get current DNS records for this domain
+            cursor.execute('''
+                SELECT record_name, record_type, record_address
+                FROM dns_records
+                WHERE domain_name = ? AND is_current = TRUE
+            ''', (domain_name,))
+
+            dns_records = cursor.fetchall()
+
+            if not dns_records:
+                return "Missing: SPF, Google Verification, DMARC, DKIM"
+
+            # Track found records
+            spf_found = False
+            google_verification_found = False
+            dmarc_found = False
+            dkim_found = False
+
+            # Check each stored DNS record
+            for record_name, record_type, record_address in dns_records:
+                record_type = record_type.upper()
+                record_name = record_name.lower()
+                record_address = record_address.strip()
+
+                # Check SPF record (TXT record containing "v=spf1")
+                if record_type == 'TXT' and 'v=spf1' in record_address:
+                    spf_found = True
+
+                # Check Google verification (TXT record containing "google-site-verification")
+                if record_type == 'TXT' and 'google-site-verification' in record_address:
+                    google_verification_found = True
+
+                # Check DMARC record (hostname "_dmarc")
+                if record_name == '_dmarc':
+                    dmarc_found = True
+
+                # Check DKIM record (any record containing "v=DKIM1;")
+                if 'v=DKIM1;' in record_address:
+                    dkim_found = True
+
+            # Build list of missing records
+            missing_records = []
+            if not spf_found:
+                missing_records.append('SPF')
+            if not google_verification_found:
+                missing_records.append('Google Verification')
+            if not dmarc_found:
+                missing_records.append('DMARC')
+            if not dkim_found:
+                missing_records.append('DKIM')
+
+            if missing_records:
+                return f"Missing: {', '.join(missing_records)}"
+            else:
+                return 'ok'
 
     # DNS Backup and Restore Methods
     def backup_dns_records(self, domain_name: str, dns_records: List[Dict]) -> bool:

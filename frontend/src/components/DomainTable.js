@@ -151,9 +151,10 @@ const DomainTable = ({
             />
           </th>
           <th style={{ width: '5%' }}>#</th>
-          <th style={{ width: '25%' }}>Domain</th>
-          <th style={{ width: '35%' }}>Redirect Target</th>
-          <th style={{ width: '15%' }}>Client</th>
+          <th style={{ width: '20%' }}>Domain</th>
+          <th style={{ width: '30%' }}>Redirect Target</th>
+          <th style={{ width: '12%' }}>Client</th>
+          <th style={{ width: '18%' }}>DNS Issues</th>
           <th style={{ width: '15%' }}>Status</th>
         </tr>
       </thead>
@@ -205,6 +206,17 @@ const DomainTable = ({
                   </option>
                 ))}
               </select>
+            </td>
+            <td>
+              <span style={{
+                color: domain.dns_issues === 'ok' ? '#10b981' : '#ef4444',
+                fontWeight: '600',
+                fontSize: '0.875rem'
+              }}>
+                {domain.dns_issues === 'ok' ? '✅ OK' :
+                 domain.dns_issues === 'null' || domain.dns_issues === null ? '⏺ Not Checked' :
+                 domain.dns_issues || '⏺ Not Checked'}
+              </span>
             </td>
             <td>
               {getStatusDisplay(domain.domain_name)}
