@@ -4129,17 +4129,20 @@ def check_dns_for_selected():
                     "success": True,
                     "dns_issues": issues
                 }
+                print(f"DNS check for {domain_name}: {issues}")
             except Exception as e:
                 results[domain_name] = {
                     "success": False,
                     "error": str(e)
                 }
+                print(f"Error checking DNS for {domain_name}: {e}")
 
         return jsonify({
             "status": "success",
             "results": results
         })
     except Exception as e:
+        print(f"Error in check_dns_for_selected: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':

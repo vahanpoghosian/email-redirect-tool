@@ -375,6 +375,7 @@ class Database:
                 UPDATE domains SET dns_issues = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE domain_name = ?
             ''', (issues, domain_name))
+            conn.commit()
 
     def check_dns_records_for_domain(self, domain_name: str) -> str:
         """
