@@ -298,29 +298,49 @@ class NamecheapAPIClient:
     
     def get_all_domains_paginated(self) -> List[Dict]:
         """Get ALL domains by fetching all pages"""
+        import time
+
         all_domains = []
         page = 1
         page_size = 100  # Request 100 per page, but Namecheap might limit to 20
-        
+        total_expected = None
+
         while True:
             print(f"🔄 Fetching domains page {page} (requesting {page_size} per page)...")
+
+            # Add small delay between requests to avoid rate limiting (except first page)
+            if page > 1:
+                time.sleep(0.5)  # 500ms delay between pages
+
             page_domains = self.get_domain_list(page, page_size)
-            
+
             if not page_domains:
                 print(f"✅ No more domains on page {page}. Total: {len(all_domains)}")
                 break
-                
+
             print(f"📄 Got {len(page_domains)} domains on page {page}")
             all_domains.extend(page_domains)
-            
-            # Continue to next page regardless of count (Namecheap might limit to 20)
+
+            # Check if we've fetched all domains based on total count
+            if total_expected is None:
+                # Get total from first page response (set by get_domain_list)
+                # This is a rough estimate since get_domain_list logs it but doesn't return it
+                # We'll rely on empty response as termination condition
+                pass
+
+            # If we got fewer domains than requested, we're likely on the last page
+            if len(page_domains) < page_size:
+                print(f"✅ Last page detected (got {len(page_domains)} < {page_size}). Total: {len(all_domains)}")
+                break
+
+            # Continue to next page
             page += 1
-            
-            # Safety check to avoid infinite loops
-            if page > 100:  # Allow more pages for large accounts
+
+            # Safety check to avoid infinite loops (increased for large accounts)
+            if page > 200:  # Increased from 100 to handle up to 4000 domains
                 print(f"⚠️ Reached maximum page limit ({page-1} pages). Total domains: {len(all_domains)}")
                 break
-        
+
         print(f"✅ Domain fetching complete. Total domains retrieved: {len(all_domains)}")
         return all_domains
     
