@@ -427,7 +427,9 @@ class Database:
             dns_records = cursor.fetchall()
 
             if not dns_records:
-                return "Missing: SPF, Google Verification, DMARC, DKIM"
+                # sync from api
+
+                return None
 
             # Track found records
             spf_found = False

@@ -9,7 +9,7 @@ import json
 import os
 from datetime import datetime
 from functools import wraps
-from namecheap_client import EmailRedirectionManager
+from namecheap_client import EmailRedirectionManager, NamecheapAPIClient
 from models import Database
 
 app = Flask(__name__, static_folder='frontend/build/static', static_url_path='/static')
@@ -4131,6 +4131,9 @@ def check_dns_for_selected():
         for domain_name in domains:
             try:
                 issues = db.check_dns_records_for_domain(domain_name)
+                if issues is None:
+
+                    issues = NamecheapAPIClient._get_all_hosts(domain_name)
                 db.update_domain_dns_issues(domain_name, issues)
                 results[domain_name] = {
                     "success": True,
