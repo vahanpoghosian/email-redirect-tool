@@ -3032,7 +3032,8 @@ def get_domains():
                 "status": db_domain.get('sync_status', 'ready'),
                 "client_id": db_domain.get('client_id'),
                 "client_name": client_lookup.get(db_domain.get('client_id'), {}).get('name', 'Unassigned') if db_domain.get('client_id') else 'Unassigned',
-                "updated_at": db_domain.get('updated_at')
+                "updated_at": db_domain.get('updated_at'),
+                "dns_issues": db_domain.get('dns_issues', None)
             }
             domains.append(domain_obj)
 
