@@ -4132,8 +4132,20 @@ def check_dns_for_selected():
             try:
                 issues = db.check_dns_records_for_domain(domain_name)
                 if issues is None:
+                    # No DNS records in database, fetch from Namecheap API
+                    print(f"No DNS records found in DB for {domain_name}, fetching from API...")
+                    dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
 
-                    issues = NamecheapAPIClient._get_all_hosts(domain_name)
+                    # Store DNS records in database
+                    if dns_records:
+                        db.backup_dns_records(domain_name, dns_records)
+                        print(f"Stored {len(dns_records)} DNS records for {domain_name}")
+
+                        # Now check for issues again
+                        issues = db.check_dns_records_for_domain(domain_name)
+                    else:
+                        issues = "No DNS records found"
+
                 db.update_domain_dns_issues(domain_name, issues)
                 results[domain_name] = {
                     "success": True,
