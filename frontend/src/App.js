@@ -19,6 +19,7 @@ function App() {
   const [clientFilter, setClientFilter] = useState('');
   const [bulkUpdateResults, setBulkUpdateResults] = useState({});
   const [dnsCheckInProgress, setDnsCheckInProgress] = useState(false);
+  const [dnsCheckProgress, setDnsCheckProgress] = useState('');
 
   // Load initial data
   useEffect(() => {
@@ -287,24 +288,68 @@ function App() {
       }
 
       setDnsCheckInProgress(true);
-      const response = await axios.post('/api/check-dns-for-selected', {
-        domains: selectedDomains
-      });
 
-      if (response.data.status === 'success') {
-        alert(`DNS check completed for ${selectedDomains.length} domains`);
+      // If more than 40 domains, send in batches of 40 with 15-second interval
+      if (selectedDomains.length > 40) {
+        const batchSize = 40;
+        const totalBatches = Math.ceil(selectedDomains.length / batchSize);
+        let successfulBatches = 0;
+        let failedBatches = 0;
 
-        // Refresh domains to show updated DNS status
-        await loadDomainsAndClients();
-        setSelectedDomains([]);
+        for (let i = 0; i < selectedDomains.length; i += batchSize) {
+          const batch = selectedDomains.slice(i, i + batchSize);
+          const batchNumber = Math.floor(i / batchSize) + 1;
+
+          setDnsCheckProgress(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} domains)...`);
+
+          try {
+            const response = await axios.post('/api/check-dns-for-selected', {
+              domains: batch
+            });
+
+            if (response.data.status === 'success') {
+              successfulBatches++;
+              console.log(`Batch ${batchNumber}/${totalBatches} completed successfully`);
+            } else {
+              failedBatches++;
+              console.error(`Batch ${batchNumber}/${totalBatches} failed:`, response.data.error);
+            }
+          } catch (error) {
+            failedBatches++;
+            console.error(`Error in batch ${batchNumber}/${totalBatches}:`, error);
+          }
+
+          // Wait 15 seconds before next batch (except for the last batch)
+          if (i + batchSize < selectedDomains.length) {
+            setDnsCheckProgress(`Waiting 15 seconds before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, 15000));
+          }
+        }
+
+        setDnsCheckProgress('');
+        alert(`DNS check completed!\nTotal domains: ${selectedDomains.length}\nBatches processed: ${successfulBatches}/${totalBatches}\nFailed batches: ${failedBatches}`);
       } else {
-        alert('Error checking DNS records: ' + (response.data.error || 'Unknown error'));
+        // For 40 or fewer domains, send all at once
+        const response = await axios.post('/api/check-dns-for-selected', {
+          domains: selectedDomains
+        });
+
+        if (response.data.status === 'success') {
+          alert(`DNS check completed for ${selectedDomains.length} domains`);
+        } else {
+          alert('Error checking DNS records: ' + (response.data.error || 'Unknown error'));
+        }
       }
+
+      // Refresh domains to show updated DNS status
+      await loadDomainsAndClients();
+      setSelectedDomains([]);
     } catch (error) {
       console.error('Error checking DNS records:', error);
       alert('Error checking DNS records: ' + (error.response?.data?.error || error.message));
     } finally {
       setDnsCheckInProgress(false);
+      setDnsCheckProgress('');
     }
   };
 
@@ -389,7 +434,9 @@ function App() {
               onClick={checkDnsForSelected}
               disabled={selectedDomains.length === 0 || dnsCheckInProgress}
             >
-              {dnsCheckInProgress ? '🔍 Checking...' : `🔍 Check DNS (${selectedDomains.length})`}
+              {dnsCheckInProgress
+                ? (dnsCheckProgress ? `🔍 ${dnsCheckProgress}` : '🔍 Checking...')
+                : `🔍 Check DNS (${selectedDomains.length})`}
             </button>
 
             <button
