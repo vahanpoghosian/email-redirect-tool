@@ -2973,8 +2973,8 @@ def get_domains():
         # Get domains with redirections from database
         db_domains = db.get_all_domains_with_redirections()
 
-        # Create a lookup for database domains
-        db_lookup = {d['domain_name']: d for d in db_domains}
+        # Create a lookup for database domains (case-insensitive)
+        db_lookup = {d['domain_name'].lower(): d for d in db_domains}
 
         # Debug logging
         print(f"DEBUG: Namecheap returned {len(domain_names)} domains")
@@ -2997,7 +2997,13 @@ def get_domains():
         # Transform domain names into objects that React expects
         domains = []
         for i, domain_name in enumerate(domain_names, 1):
-            db_domain = db_lookup.get(domain_name, {})
+            db_domain = db_lookup.get(domain_name.lower(), {})
+
+            # Debug: Log if domain not found in database
+            if not db_domain:
+                print(f"⚠️ WARNING: Domain '{domain_name}' from Namecheap not found in database")
+            else:
+                print(f"✓ Domain '{domain_name}' found in DB with dns_issues: {db_domain.get('dns_issues')}")
 
             # Use database domain number if available
             domain_number = db_domain.get('domain_number', i)

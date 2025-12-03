@@ -371,10 +371,34 @@ class Database:
         """Update DNS issues for a domain"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE domains SET dns_issues = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE domain_name = ?
-            ''', (issues, domain_name))
+
+            # First check if domain exists
+            cursor.execute('SELECT id FROM domains WHERE domain_name = ?', (domain_name,))
+            domain_exists = cursor.fetchone()
+
+            if domain_exists:
+                # Update existing domain
+                cursor.execute('''
+                    UPDATE domains SET dns_issues = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE domain_name = ?
+                ''', (issues, domain_name))
+            else:
+                # Insert new domain with dns_issues
+                # Get next domain number
+                cursor.execute('SELECT MAX(domain_number) FROM domains')
+                max_num = cursor.fetchone()[0]
+                next_num = (max_num or 0) + 1
+
+                # Get "Unassigned" client ID
+                cursor.execute('SELECT id FROM clients WHERE client_name = ?', ('Unassigned',))
+                unassigned_client = cursor.fetchone()
+                client_id = unassigned_client[0] if unassigned_client else None
+
+                cursor.execute('''
+                    INSERT INTO domains (domain_number, domain_name, client_id, dns_issues, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (next_num, domain_name, client_id, issues))
+
             conn.commit()
 
     def check_dns_records_for_domain(self, domain_name: str) -> str:
