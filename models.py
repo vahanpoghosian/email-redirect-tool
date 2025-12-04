@@ -436,7 +436,9 @@ class Database:
             google_verification_found = False
             dmarc_found = False
             dkim_found = False
-
+            print('=' * 20)
+            print(dns_records)
+            print('=' * 20)
             # Check each stored DNS record
             for record_name, record_type, record_address in dns_records:
                 record_type = record_type.upper()
@@ -444,11 +446,11 @@ class Database:
                 record_address = record_address.strip()
 
                 # Check SPF record (TXT record containing "v=spf1")
-                if record_type == 'TXT' and 'v=spf1' in record_address:
+                if 'v=spf1' in record_address:
                     spf_found = True
 
                 # Check Google verification (TXT record containing "google-site-verification")
-                if record_type == 'TXT' and 'google-site-verification' in record_address:
+                if 'google-site-verification' in record_address:
                     google_verification_found = True
 
                 # Check DMARC record (hostname "_dmarc")
