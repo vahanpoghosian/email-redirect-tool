@@ -231,6 +231,7 @@ class Database:
                                domain_name,
                                record_name,
                                record_type,
+                               record_address,
                                is_current
                            )
                                )
