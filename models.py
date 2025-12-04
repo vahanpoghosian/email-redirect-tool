@@ -588,10 +588,10 @@ class Database:
                 if 'google-site-verification' in record_address_lower:
                     google_verification_found = True
 
-                if record_name == '_dmarc' and 'v=dmarc1' in record_address_lower:
+                if record_name == '_dmarc':
                     dmarc_found = True
 
-                if 'v=dkim1' in record_address_lower:
+                if 'v=dkim1;' in record_address_lower:
                     dkim_found = True
 
             # Build list of missing records
