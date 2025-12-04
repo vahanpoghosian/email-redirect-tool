@@ -11,7 +11,7 @@ from datetime import datetime
 from functools import wraps
 from namecheap_client import EmailRedirectionManager, NamecheapAPIClient
 from models import Database
-
+import time
 app = Flask(__name__, static_folder='frontend/build/static', static_url_path='/static')
 app.secret_key = os.environ.get('SECRET_KEY', 'change-in-production-email-redirect-tool')
 CORS(app)
@@ -1926,24 +1926,47 @@ def background_sync_with_rate_limiting(resume_from_index=None):
                     # Continue processing even if domain add fails
                     sync_progress["errors"].append(f"{domain_name}: Database error - {str(domain_error)}")
                 
-                # Get redirections with retry logic for rate limits
+                # Get redirections and DNS records with retry logic for rate limits
                 redirections_fetched = False
                 redirect_retry = 0
                 max_redirect_retries = 5  # Increased from 3 to 5 retries
-                
+
                 while redirect_retry < max_redirect_retries and not redirections_fetched:
                     try:
-                        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+                        # Fetch all DNS records (includes redirections, TXT, MX, etc.)
+                        all_dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
                         redirections_fetched = True
-                        
-                        if redirections:
-                            db.update_redirections(domain_name, redirections)
+
+                        if all_dns_records:
+                            # Store all DNS records in database
+                            db.backup_dns_records(domain_name, all_dns_records)
+                            print(f"  📋 Stored {len(all_dns_records)} DNS records for {domain_name}")
+
+                            # Extract URL redirections from DNS records
+                            redirections = []
+                            for record in all_dns_records:
+                                if isinstance(record, dict):
+                                    record_type = record.get('Type', '').upper()
+                                    if record_type in ['URL', 'URL301', 'URL302', 'REDIRECT']:
+                                        redirections.append({
+                                            'type': 'URL Redirect (301)' if record_type == 'URL301' else 'URL Redirect',
+                                            'target': record.get('Address', ''),
+                                            'name': record.get('Name', '@')
+                                        })
+
+                            if redirections:
+                                db.update_redirections(domain_name, redirections)
+                                print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
+
+                            # Check and update DNS issues
+                            dns_issues = db.check_dns_records_for_domain(domain_name)
+                            db.update_domain_dns_issues(domain_name, dns_issues)
+
                             db.update_domain_sync_status(domain_name, 'synced')
-                            print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
                         else:
                             db.update_domain_sync_status(domain_name, 'synced')
-                            print(f"  ℹ️ No redirections found for {domain_name}")
-                            
+                            print(f"  ℹ️ No DNS records found for {domain_name}")
+
                     except Exception as redirect_error:
                         redirect_retry += 1
                         error_msg = str(redirect_error)
@@ -2381,13 +2404,37 @@ def background_sync_selected_domains(selected_domains, resume_from_index=None):
 
                 while retry < max_retries and not synced:
                     try:
-                        # Get redirections for this domain
-                        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
+                        # Fetch all DNS records (includes redirections, TXT, MX, etc.)
+                        all_dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
 
-                        if redirections is not None:
-                            # Update domain redirections
+                        if all_dns_records is not None and len(all_dns_records) > 0:
+                            # Update domain in database
                             db.add_or_update_domain(domain_name)
-                            db.update_redirections(domain_name, redirections)
+
+                            # Store all DNS records in database
+                            db.backup_dns_records(domain_name, all_dns_records)
+                            print(f"  📋 Stored {len(all_dns_records)} DNS records for {domain_name}")
+
+                            # Extract URL redirections from DNS records
+                            redirections = []
+                            for record in all_dns_records:
+                                if isinstance(record, dict):
+                                    record_type = record.get('Type', '').upper()
+                                    if record_type in ['URL', 'URL301', 'URL302', 'REDIRECT']:
+                                        redirections.append({
+                                            'type': 'URL Redirect (301)' if record_type == 'URL301' else 'URL Redirect',
+                                            'target': record.get('Address', ''),
+                                            'name': record.get('Name', '@')
+                                        })
+
+                            if redirections:
+                                db.update_redirections(domain_name, redirections)
+                                print(f"  ✅ Added {len(redirections)} redirections for {domain_name}")
+
+                            # Check and update DNS issues
+                            dns_issues = db.check_dns_records_for_domain(domain_name)
+                            db.update_domain_dns_issues(domain_name, dns_issues)
+
                             db.update_domain_sync_status(domain_name, 'synced')
                             sync_progress["domains_updated"] += 1
                             synced = True
@@ -2454,18 +2501,41 @@ def sync_single_domain():
         
         # Add/update domain in database
         domain_number = db.add_or_update_domain(domain_name)
-        
-        # Get redirections from Namecheap
-        redirections = get_email_manager().api_client.get_domain_redirections(domain_name)
-        
-        # Update redirections in database
-        db.update_redirections(domain_name, redirections)
-        
+
+        # Fetch all DNS records (includes redirections, TXT, MX, etc.)
+        all_dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
+
+        # Store all DNS records in database
+        if all_dns_records:
+            db.backup_dns_records(domain_name, all_dns_records)
+
+            # Extract URL redirections from DNS records
+            redirections = []
+            for record in all_dns_records:
+                if isinstance(record, dict):
+                    record_type = record.get('Type', '').upper()
+                    if record_type in ['URL', 'URL301', 'URL302', 'REDIRECT']:
+                        redirections.append({
+                            'type': 'URL Redirect (301)' if record_type == 'URL301' else 'URL Redirect',
+                            'target': record.get('Address', ''),
+                            'name': record.get('Name', '@')
+                        })
+
+            # Update redirections in database
+            db.update_redirections(domain_name, redirections)
+
+            # Check and update DNS issues
+            dns_issues = db.check_dns_records_for_domain(domain_name)
+            db.update_domain_dns_issues(domain_name, dns_issues)
+        else:
+            redirections = []
+
         return jsonify({
             "status": "success",
             "domain_name": domain_name,
             "domain_number": domain_number,
-            "redirections_count": len(redirections)
+            "redirections_count": len(redirections),
+            "dns_records_count": len(all_dns_records) if all_dns_records else 0
         })
         
     except Exception as e:
