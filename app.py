@@ -4117,7 +4117,7 @@ def check_dns_for_domain(domain_name):
 
 @app.route('/api/check-dns-for-selected', methods=['POST'])
 def check_dns_for_selected():
-    """Check stored DNS records for selected domains"""
+    """Check stored DNS records for selected domains with concurrent processing"""
     try:
         data = request.json
         domains = data.get('domains', [])
@@ -4125,39 +4125,70 @@ def check_dns_for_selected():
         if not domains:
             return jsonify({"error": "No domains provided"}), 400
 
-        db = Database()
+        print(f"Starting DNS check for {len(domains)} domains...")
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time
+
         results = {}
 
-        for domain_name in domains:
+        def check_single_domain(domain_name):
+            """Check DNS for a single domain"""
             try:
-                issues = db.check_dns_records_for_domain(domain_name)
+                # Use a separate DB connection for each thread
+                thread_db = Database()
+
+                issues = thread_db.check_dns_records_for_domain(domain_name)
                 if issues is None:
                     # No DNS records in database, fetch from Namecheap API
                     print(f"No DNS records found in DB for {domain_name}, fetching from API...")
+
+                    # Add a small delay to avoid rate limiting
+                    time.sleep(0.2)
+
                     dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
 
                     # Store DNS records in database
                     if dns_records:
-                        db.backup_dns_records(domain_name, dns_records)
+                        thread_db.backup_dns_records(domain_name, dns_records)
                         print(f"Stored {len(dns_records)} DNS records for {domain_name}")
 
                         # Now check for issues again
-                        issues = db.check_dns_records_for_domain(domain_name)
+                        issues = thread_db.check_dns_records_for_domain(domain_name)
                     else:
                         issues = "No DNS records found"
 
-                db.update_domain_dns_issues(domain_name, issues)
-                results[domain_name] = {
+                thread_db.update_domain_dns_issues(domain_name, issues)
+                print(f"DNS check for {domain_name}: {issues}")
+
+                return {
+                    "domain": domain_name,
                     "success": True,
                     "dns_issues": issues
                 }
-                print(f"DNS check for {domain_name}: {issues}")
             except Exception as e:
-                results[domain_name] = {
+                print(f"Error checking DNS for {domain_name}: {e}")
+                return {
+                    "domain": domain_name,
                     "success": False,
                     "error": str(e)
                 }
-                print(f"Error checking DNS for {domain_name}: {e}")
+
+        # Process domains concurrently with a thread pool
+        # Use max 10 workers to avoid overwhelming the API
+        max_workers = min(10, len(domains))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_domain = {executor.submit(check_single_domain, domain): domain for domain in domains}
+
+            # Collect results as they complete
+            for future in as_completed(future_to_domain):
+                result = future.result()
+                domain_name = result.pop("domain")
+                results[domain_name] = result
+
+        print(f"Completed DNS check for {len(domains)} domains. Successful: {sum(1 for r in results.values() if r['success'])}")
 
         return jsonify({
             "status": "success",
@@ -4165,6 +4196,8 @@ def check_dns_for_selected():
         })
     except Exception as e:
         print(f"Error in check_dns_for_selected: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
