@@ -7,6 +7,8 @@ import requests
 import json
 import csv
 import os
+import time
+import threading
 from typing import Dict, List, Optional
 from datetime import datetime
 import xml.etree.ElementTree as ET
@@ -15,12 +17,106 @@ class NamecheapAPIError(Exception):
     """Custom exception for Namecheap API errors"""
     pass
 
+class RateLimitState:
+    """Thread-safe rate limiting state tracker"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.request_timestamps = []
+        self.is_paused = False
+        self.pause_until = None
+        self.pause_reason = None
+        self.requests_per_minute = 20
+        self.requests_per_hour = 700
+        self.requests_per_day = 8000
+        self.min_delay_between_requests = 3.0
+
+    def record_request(self):
+        """Record a request timestamp"""
+        with self.lock:
+            now = time.time()
+            self.request_timestamps.append(now)
+            one_day_ago = now - 86400
+            self.request_timestamps = [ts for ts in self.request_timestamps if ts > one_day_ago]
+
+    def get_counts(self):
+        """Get request counts for last minute, hour, and day"""
+        with self.lock:
+            now = time.time()
+            one_minute_ago = now - 60
+            one_hour_ago = now - 3600
+            one_day_ago = now - 86400
+
+            minute_count = sum(1 for ts in self.request_timestamps if ts > one_minute_ago)
+            hour_count = sum(1 for ts in self.request_timestamps if ts > one_hour_ago)
+            day_count = sum(1 for ts in self.request_timestamps if ts > one_day_ago)
+
+            return minute_count, hour_count, day_count
+
+    def should_wait(self):
+        """Check if we should wait before making a request, returns wait time in seconds"""
+        with self.lock:
+            if self.is_paused:
+                if self.pause_until and time.time() < self.pause_until:
+                    return self.pause_until - time.time()
+                else:
+                    self.is_paused = False
+                    self.pause_until = None
+                    self.pause_reason = None
+
+            minute_count, hour_count, day_count = self.get_counts()
+
+            if minute_count >= self.requests_per_minute - 1:
+                return 60 - (time.time() - self.request_timestamps[-self.requests_per_minute])
+            if hour_count >= self.requests_per_hour - 10:
+                return 3600 - (time.time() - self.request_timestamps[-self.requests_per_hour])
+            if day_count >= self.requests_per_day - 100:
+                return 86400 - (time.time() - self.request_timestamps[-self.requests_per_day])
+
+            return 0
+
+    def set_paused(self, duration_seconds=900, reason="Rate limit exceeded"):
+        """Pause requests for specified duration (default 15 minutes)"""
+        with self.lock:
+            self.is_paused = True
+            self.pause_until = time.time() + duration_seconds
+            self.pause_reason = reason
+
+    def resume(self):
+        """Resume requests"""
+        with self.lock:
+            self.is_paused = False
+            self.pause_until = None
+            self.pause_reason = None
+
+    def get_status(self):
+        """Get current rate limit status"""
+        with self.lock:
+            minute_count, hour_count, day_count = self.get_counts()
+            return {
+                "is_paused": self.is_paused,
+                "pause_until": self.pause_until,
+                "pause_reason": self.pause_reason,
+                "time_until_resume": max(0, self.pause_until - time.time()) if self.pause_until else 0,
+                "requests_last_minute": minute_count,
+                "requests_last_hour": hour_count,
+                "requests_last_day": day_count,
+                "limits": {
+                    "per_minute": self.requests_per_minute,
+                    "per_hour": self.requests_per_hour,
+                    "per_day": self.requests_per_day
+                }
+            }
+
+rate_limit_state = RateLimitState()
+
 class NamecheapAPIClient:
     """Client for Namecheap API operations"""
-    
+
     def __init__(self):
         """Initialize Namecheap API client"""
         self.base_url = "https://api.namecheap.com/xml.response"
+        self.rate_limit = rate_limit_state
         self.api_user = os.environ.get('NAMECHEAP_API_USER')
         self.api_key = os.environ.get('NAMECHEAP_API_KEY')
         self.username = os.environ.get('NAMECHEAP_USERNAME', self.api_user)
@@ -66,8 +162,15 @@ class NamecheapAPIClient:
     
 
     def _make_request(self, command: str, **params) -> Dict:
-        """Make API request to Namecheap"""
-        
+        """Make API request to Namecheap with rate limiting"""
+
+        wait_time = self.rate_limit.should_wait()
+        if wait_time > 0:
+            print(f"Rate limit protection: waiting {wait_time:.1f}s before request")
+            time.sleep(wait_time)
+
+        self.rate_limit.record_request()
+
         # Base parameters for all requests
         base_params = {
             'ApiUser': self.api_user,
@@ -140,9 +243,19 @@ class NamecheapAPIClient:
                 raise NamecheapAPIError(f"Invalid XML response: {xml_error}")
             
         except requests.RequestException as e:
+            error_msg = str(e).lower()
+            if "too many requests" in error_msg or "rate limit" in error_msg or "429" in error_msg:
+                print(f"Rate limit hit: {e}")
+                self.rate_limit.set_paused(900, f"Rate limit exceeded: {e}")
+                raise NamecheapAPIError(f"Rate limit exceeded - pausing for 15 minutes: {str(e)}")
             print(f"Request failed: {e}")
             raise NamecheapAPIError(f"API request failed: {str(e)}")
         except Exception as e:
+            error_msg = str(e).lower()
+            if "too many requests" in error_msg or "rate limit" in error_msg:
+                print(f"Rate limit hit: {e}")
+                self.rate_limit.set_paused(900, f"Rate limit exceeded: {e}")
+                raise NamecheapAPIError(f"Rate limit exceeded - pausing for 15 minutes: {str(e)}")
             print(f"Unexpected error: {e}")
             raise NamecheapAPIError(f"Unexpected error: {str(e)}")
     
@@ -310,7 +423,7 @@ class NamecheapAPIClient:
 
             # Add small delay between requests to avoid rate limiting (except first page)
             if page > 1:
-                time.sleep(0.5)  # 500ms delay between pages
+                time.sleep(3.0)  # 3s delay between pages (Namecheap: 20 req/min)
 
             page_domains = self.get_domain_list(page, page_size)
 

@@ -1826,6 +1826,20 @@ bulk_dns_remove_progress = {
     "remove_criteria": None
 }
 
+dns_check_progress = {
+    "status": "idle",
+    "processed": 0,
+    "total": 0,
+    "current_domain": "",
+    "successful": 0,
+    "errors": [],
+    "should_stop": False,
+    "paused_at_index": None,
+    "rate_limit_message": None,
+    "paused_domains": None,
+    "pause_until": None
+}
+
 import threading
 import time
 
@@ -4185,9 +4199,118 @@ def check_dns_for_domain(domain_name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def background_dns_check(domains, start_index=0):
+    """Background function to check DNS records with rate limiting and pause/resume"""
+    global dns_check_progress
+    from namecheap_client import rate_limit_state
+
+    try:
+        dns_check_progress["status"] = "running"
+        dns_check_progress["total"] = len(domains)
+        dns_check_progress["paused_domains"] = domains
+
+        for i, domain_name in enumerate(domains[start_index:], start=start_index + 1):
+            if dns_check_progress["should_stop"]:
+                dns_check_progress["status"] = "stopped"
+                dns_check_progress["current_domain"] = ""
+                print(f"DNS check stopped by user at domain {i}/{len(domains)}")
+                return
+
+            rate_status = rate_limit_state.get_status()
+            if rate_status["is_paused"]:
+                dns_check_progress["status"] = "paused"
+                dns_check_progress["paused_at_index"] = i - 1
+                dns_check_progress["pause_until"] = rate_status["pause_until"]
+                dns_check_progress["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(rate_status['time_until_resume'])}s"
+                print(f"DNS check paused due to rate limit at domain {i}/{len(domains)}")
+
+                while rate_limit_state.get_status()["is_paused"]:
+                    time.sleep(10)
+                    remaining = rate_limit_state.get_status()["time_until_resume"]
+                    dns_check_progress["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(remaining)}s"
+
+                dns_check_progress["status"] = "running"
+                dns_check_progress["rate_limit_message"] = None
+                dns_check_progress["pause_until"] = None
+                print(f"DNS check resuming after rate limit pause")
+
+            dns_check_progress["processed"] = i
+            dns_check_progress["current_domain"] = domain_name
+
+            print(f"Checking DNS {i}/{len(domains)}: {domain_name}")
+
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    thread_db = Database()
+                    issues = thread_db.check_dns_records_for_domain(domain_name)
+
+                    if issues is None:
+                        print(f"No DNS records in DB for {domain_name}, fetching from API...")
+                        time.sleep(3.0)
+
+                        dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
+
+                        if dns_records:
+                            thread_db.backup_dns_records(domain_name, dns_records)
+                            print(f"Stored {len(dns_records)} DNS records for {domain_name}")
+                            issues = thread_db.check_dns_records_for_domain(domain_name)
+                        else:
+                            issues = "No DNS records found"
+
+                    thread_db.update_domain_dns_issues(domain_name, issues)
+                    dns_check_progress["successful"] += 1
+                    print(f"DNS check for {domain_name}: {issues}")
+                    break
+
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    is_rate_limited = (
+                        "too many requests" in error_msg or
+                        "rate limit" in error_msg or
+                        "429" in error_msg
+                    )
+
+                    if is_rate_limited:
+                        print(f"Rate limit hit on {domain_name}, pausing for 15 minutes...")
+                        rate_limit_state.set_paused(900, f"Rate limit at {domain_name}")
+                        dns_check_progress["status"] = "paused"
+                        dns_check_progress["paused_at_index"] = i - 1
+                        dns_check_progress["rate_limit_message"] = "Rate limit exceeded. Auto-resuming in 15 minutes..."
+
+                        while rate_limit_state.get_status()["is_paused"]:
+                            time.sleep(10)
+                            remaining = rate_limit_state.get_status()["time_until_resume"]
+                            dns_check_progress["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(remaining)}s"
+
+                        dns_check_progress["status"] = "running"
+                        dns_check_progress["rate_limit_message"] = None
+                        continue
+
+                    if retry < max_retries - 1:
+                        print(f"Retry {retry + 1}/{max_retries} for {domain_name}: {e}")
+                        time.sleep(5)
+                    else:
+                        dns_check_progress["errors"].append(f"{domain_name}: {str(e)}")
+                        print(f"Failed DNS check for {domain_name}: {e}")
+
+            time.sleep(3.0)
+
+        dns_check_progress["status"] = "completed"
+        dns_check_progress["current_domain"] = ""
+        print(f"DNS check completed: {dns_check_progress['successful']} successful, {len(dns_check_progress['errors'])} errors")
+
+    except Exception as e:
+        dns_check_progress["status"] = "error"
+        dns_check_progress["rate_limit_message"] = str(e)
+        print(f"DNS check error: {e}")
+
+
 @app.route('/api/check-dns-for-selected', methods=['POST'])
 def check_dns_for_selected():
-    """Check stored DNS records for selected domains with concurrent processing"""
+    """Start background DNS check for selected domains with rate limiting"""
+    global dns_check_progress
+
     try:
         data = request.json
         domains = data.get('domains', [])
@@ -4195,80 +4318,104 @@ def check_dns_for_selected():
         if not domains:
             return jsonify({"error": "No domains provided"}), 400
 
-        print(f"Starting DNS check for {len(domains)} domains...")
+        if dns_check_progress["status"] == "running":
+            return jsonify({"error": "DNS check already in progress"}), 400
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import time
+        dns_check_progress = {
+            "status": "running",
+            "processed": 0,
+            "total": len(domains),
+            "current_domain": "",
+            "successful": 0,
+            "errors": [],
+            "should_stop": False,
+            "paused_at_index": None,
+            "rate_limit_message": None,
+            "paused_domains": domains,
+            "pause_until": None
+        }
 
-        results = {}
-
-        def check_single_domain(domain_name):
-            """Check DNS for a single domain"""
-            try:
-                # Use a separate DB connection for each thread
-                thread_db = Database()
-
-                issues = thread_db.check_dns_records_for_domain(domain_name)
-                if issues is None:
-                    # No DNS records in database, fetch from Namecheap API
-                    print(f"No DNS records found in DB for {domain_name}, fetching from API...")
-
-                    # Add a small delay to avoid rate limiting
-                    time.sleep(0.2)
-
-                    dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
-
-                    # Store DNS records in database
-                    if dns_records:
-                        thread_db.backup_dns_records(domain_name, dns_records)
-                        print(f"Stored {len(dns_records)} DNS records for {domain_name}")
-
-                        # Now check for issues again
-                        issues = thread_db.check_dns_records_for_domain(domain_name)
-                    else:
-                        issues = "No DNS records found"
-
-                thread_db.update_domain_dns_issues(domain_name, issues)
-                print(f"DNS check for {domain_name}: {issues}")
-
-                return {
-                    "domain": domain_name,
-                    "success": True,
-                    "dns_issues": issues
-                }
-            except Exception as e:
-                print(f"Error checking DNS for {domain_name}: {e}")
-                return {
-                    "domain": domain_name,
-                    "success": False,
-                    "error": str(e)
-                }
-
-        # Process domains concurrently with a thread pool
-        # Use max 10 workers to avoid overwhelming the API
-        max_workers = min(10, len(domains))
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
-            future_to_domain = {executor.submit(check_single_domain, domain): domain for domain in domains}
-
-            # Collect results as they complete
-            for future in as_completed(future_to_domain):
-                result = future.result()
-                domain_name = result.pop("domain")
-                results[domain_name] = result
-
-        print(f"Completed DNS check for {len(domains)} domains. Successful: {sum(1 for r in results.values() if r['success'])}")
+        thread = threading.Thread(target=background_dns_check, args=(domains,))
+        thread.daemon = True
+        thread.start()
 
         return jsonify({
-            "status": "success",
-            "results": results
+            "status": "started",
+            "message": f"Started DNS check for {len(domains)} domains",
+            "total": len(domains)
         })
+
     except Exception as e:
-        print(f"Error in check_dns_for_selected: {e}")
+        print(f"Error starting DNS check: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/dns-check-progress', methods=['GET'])
+def get_dns_check_progress():
+    """Get DNS check progress including pause status"""
+    from namecheap_client import rate_limit_state
+
+    rate_status = rate_limit_state.get_status()
+
+    return jsonify({
+        "status": dns_check_progress["status"],
+        "processed": dns_check_progress["processed"],
+        "total": dns_check_progress["total"],
+        "current_domain": dns_check_progress["current_domain"],
+        "successful": dns_check_progress["successful"],
+        "errors": dns_check_progress["errors"][-5:] if dns_check_progress["errors"] else [],
+        "total_errors": len(dns_check_progress["errors"]) if dns_check_progress["errors"] else 0,
+        "rate_limit_message": dns_check_progress.get("rate_limit_message"),
+        "paused_at_index": dns_check_progress.get("paused_at_index"),
+        "pause_until": dns_check_progress.get("pause_until"),
+        "rate_limit_status": rate_status
+    })
+
+
+@app.route('/api/dns-check-stop', methods=['POST'])
+def stop_dns_check():
+    """Stop the DNS check process"""
+    global dns_check_progress
+
+    if dns_check_progress["status"] in ["running", "paused"]:
+        dns_check_progress["should_stop"] = True
+        return jsonify({"status": "stopping"})
+
+    return jsonify({"status": "not_running"})
+
+
+@app.route('/api/dns-check-resume', methods=['POST'])
+def resume_dns_check():
+    """Resume DNS check after rate limit pause"""
+    global dns_check_progress
+    from namecheap_client import rate_limit_state
+
+    if dns_check_progress["status"] != "paused":
+        return jsonify({"error": "DNS check not paused"}), 400
+
+    rate_limit_state.resume()
+    dns_check_progress["status"] = "running"
+    dns_check_progress["should_stop"] = False
+    dns_check_progress["rate_limit_message"] = None
+
+    paused_index = dns_check_progress.get("paused_at_index", 0)
+    domains = dns_check_progress.get("paused_domains", [])
+
+    if domains:
+        thread = threading.Thread(target=background_dns_check, args=(domains, paused_index))
+        thread.daemon = True
+        thread.start()
+
+    return jsonify({"status": "resumed", "from_index": paused_index})
+
+
+@app.route('/api/rate-limit-status', methods=['GET'])
+def get_rate_limit_status():
+    """Get current rate limit status from Namecheap API client"""
+    from namecheap_client import rate_limit_state
+    return jsonify(rate_limit_state.get_status())
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
