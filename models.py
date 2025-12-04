@@ -577,29 +577,21 @@ class Database:
             google_verification_found = False
             dmarc_found = False
             dkim_found = False
-            print('=' * 20)
-            print(dns_records)
-            print('=' * 20)
-            # Check each stored DNS record
             for record_name, record_type, record_address in dns_records:
                 record_type = record_type.upper()
                 record_name = record_name.lower()
-                record_address = record_address.strip()
+                record_address_lower = record_address.strip().lower()
 
-                # Check SPF record (TXT record containing "v=spf1")
-                if 'v=spf1' in record_address:
+                if 'v=spf1' in record_address_lower:
                     spf_found = True
 
-                # Check Google verification (TXT record containing "google-site-verification")
-                if 'google-site-verification' in record_address:
+                if 'google-site-verification' in record_address_lower:
                     google_verification_found = True
 
-                # Check DMARC record (hostname "_dmarc")
-                if record_name == '_dmarc':
+                if record_name == '_dmarc' and 'v=dmarc1' in record_address_lower:
                     dmarc_found = True
 
-                # Check DKIM record (any record containing "v=DKIM1;")
-                if 'v=DKIM1;' in record_address:
+                if 'v=dkim1' in record_address_lower:
                     dkim_found = True
 
             # Build list of missing records
