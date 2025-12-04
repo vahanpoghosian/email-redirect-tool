@@ -906,7 +906,9 @@ class NamecheapAPIClient:
 
             print(f"✅ Successfully retrieved {len(normalized_hosts)} DNS records for {domain}")
             print(f"📊 Record types: {', '.join([f'{count} {rtype}' for rtype, count in record_types.items()])}")
-
+            print('********** normalized_hosts **********')
+            print(normalized_hosts)
+            print('**************end normalized host***********************')
             return normalized_hosts
             
         except Exception as e:
