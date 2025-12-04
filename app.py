@@ -4199,6 +4199,28 @@ def check_dns_for_domain(domain_name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _wait_for_rate_limit_resume(rate_limit_state, progress_dict, domain_index):
+    """Wait for rate limit pause to end, updating progress. Returns True if should stop."""
+    progress_dict["status"] = "paused"
+    progress_dict["paused_at_index"] = domain_index
+    rate_status = rate_limit_state.get_status()
+    progress_dict["pause_until"] = rate_status["pause_until"]
+    progress_dict["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(rate_status['time_until_resume'])}s"
+
+    while rate_limit_state.get_status()["is_paused"]:
+        if progress_dict["should_stop"]:
+            progress_dict["status"] = "stopped"
+            return True
+        time.sleep(10)
+        remaining = rate_limit_state.get_status()["time_until_resume"]
+        progress_dict["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(remaining)}s"
+
+    progress_dict["status"] = "running"
+    progress_dict["rate_limit_message"] = None
+    progress_dict["pause_until"] = None
+    return False
+
+
 def background_dns_check(domains, start_index=0):
     """Background function to check DNS records with rate limiting and pause/resume"""
     global dns_check_progress
@@ -4216,23 +4238,11 @@ def background_dns_check(domains, start_index=0):
                 print(f"DNS check stopped by user at domain {i}/{len(domains)}")
                 return
 
-            rate_status = rate_limit_state.get_status()
-            if rate_status["is_paused"]:
-                dns_check_progress["status"] = "paused"
-                dns_check_progress["paused_at_index"] = i - 1
-                dns_check_progress["pause_until"] = rate_status["pause_until"]
-                dns_check_progress["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(rate_status['time_until_resume'])}s"
+            if rate_limit_state.get_status()["is_paused"]:
                 print(f"DNS check paused due to rate limit at domain {i}/{len(domains)}")
-
-                while rate_limit_state.get_status()["is_paused"]:
-                    time.sleep(10)
-                    remaining = rate_limit_state.get_status()["time_until_resume"]
-                    dns_check_progress["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(remaining)}s"
-
-                dns_check_progress["status"] = "running"
-                dns_check_progress["rate_limit_message"] = None
-                dns_check_progress["pause_until"] = None
-                print(f"DNS check resuming after rate limit pause")
+                if _wait_for_rate_limit_resume(rate_limit_state, dns_check_progress, i - 1):
+                    return
+                print("DNS check resuming after rate limit pause")
 
             dns_check_progress["processed"] = i
             dns_check_progress["current_domain"] = domain_name
@@ -4247,8 +4257,6 @@ def background_dns_check(domains, start_index=0):
 
                     if issues is None:
                         print(f"No DNS records in DB for {domain_name}, fetching from API...")
-                        time.sleep(3.0)
-
                         dns_records = get_email_manager().api_client._get_all_hosts(domain_name)
 
                         if dns_records:
@@ -4274,17 +4282,8 @@ def background_dns_check(domains, start_index=0):
                     if is_rate_limited:
                         print(f"Rate limit hit on {domain_name}, pausing for 15 minutes...")
                         rate_limit_state.set_paused(900, f"Rate limit at {domain_name}")
-                        dns_check_progress["status"] = "paused"
-                        dns_check_progress["paused_at_index"] = i - 1
-                        dns_check_progress["rate_limit_message"] = "Rate limit exceeded. Auto-resuming in 15 minutes..."
-
-                        while rate_limit_state.get_status()["is_paused"]:
-                            time.sleep(10)
-                            remaining = rate_limit_state.get_status()["time_until_resume"]
-                            dns_check_progress["rate_limit_message"] = f"Rate limit hit. Auto-resuming in {int(remaining)}s"
-
-                        dns_check_progress["status"] = "running"
-                        dns_check_progress["rate_limit_message"] = None
+                        if _wait_for_rate_limit_resume(rate_limit_state, dns_check_progress, i - 1):
+                            return
                         continue
 
                     if retry < max_retries - 1:
@@ -4293,8 +4292,6 @@ def background_dns_check(domains, start_index=0):
                     else:
                         dns_check_progress["errors"].append(f"{domain_name}: {str(e)}")
                         print(f"Failed DNS check for {domain_name}: {e}")
-
-            time.sleep(3.0)
 
         dns_check_progress["status"] = "completed"
         dns_check_progress["current_domain"] = ""

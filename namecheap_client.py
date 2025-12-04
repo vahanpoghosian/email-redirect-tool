@@ -39,19 +39,23 @@ class RateLimitState:
             one_day_ago = now - 86400
             self.request_timestamps = [ts for ts in self.request_timestamps if ts > one_day_ago]
 
+    def _get_counts_unlocked(self):
+        """Get request counts (must be called with lock held)"""
+        now = time.time()
+        one_minute_ago = now - 60
+        one_hour_ago = now - 3600
+        one_day_ago = now - 86400
+
+        minute_count = sum(1 for ts in self.request_timestamps if ts > one_minute_ago)
+        hour_count = sum(1 for ts in self.request_timestamps if ts > one_hour_ago)
+        day_count = sum(1 for ts in self.request_timestamps if ts > one_day_ago)
+
+        return minute_count, hour_count, day_count
+
     def get_counts(self):
         """Get request counts for last minute, hour, and day"""
         with self.lock:
-            now = time.time()
-            one_minute_ago = now - 60
-            one_hour_ago = now - 3600
-            one_day_ago = now - 86400
-
-            minute_count = sum(1 for ts in self.request_timestamps if ts > one_minute_ago)
-            hour_count = sum(1 for ts in self.request_timestamps if ts > one_hour_ago)
-            day_count = sum(1 for ts in self.request_timestamps if ts > one_day_ago)
-
-            return minute_count, hour_count, day_count
+            return self._get_counts_unlocked()
 
     def should_wait(self):
         """Check if we should wait before making a request, returns wait time in seconds"""
@@ -64,14 +68,15 @@ class RateLimitState:
                     self.pause_until = None
                     self.pause_reason = None
 
-            minute_count, hour_count, day_count = self.get_counts()
+            minute_count, hour_count, day_count = self._get_counts_unlocked()
+            now = time.time()
 
-            if minute_count >= self.requests_per_minute - 1:
-                return 60 - (time.time() - self.request_timestamps[-self.requests_per_minute])
-            if hour_count >= self.requests_per_hour - 10:
-                return 3600 - (time.time() - self.request_timestamps[-self.requests_per_hour])
-            if day_count >= self.requests_per_day - 100:
-                return 86400 - (time.time() - self.request_timestamps[-self.requests_per_day])
+            if minute_count >= self.requests_per_minute - 1 and len(self.request_timestamps) >= self.requests_per_minute:
+                return max(0, 60 - (now - self.request_timestamps[-self.requests_per_minute]))
+            if hour_count >= self.requests_per_hour - 10 and len(self.request_timestamps) >= self.requests_per_hour:
+                return max(0, 3600 - (now - self.request_timestamps[-self.requests_per_hour]))
+            if day_count >= self.requests_per_day - 100 and len(self.request_timestamps) >= self.requests_per_day:
+                return max(0, 86400 - (now - self.request_timestamps[-self.requests_per_day]))
 
             return 0
 
@@ -92,7 +97,7 @@ class RateLimitState:
     def get_status(self):
         """Get current rate limit status"""
         with self.lock:
-            minute_count, hour_count, day_count = self.get_counts()
+            minute_count, hour_count, day_count = self._get_counts_unlocked()
             return {
                 "is_paused": self.is_paused,
                 "pause_until": self.pause_until,
