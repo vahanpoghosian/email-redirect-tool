@@ -21,7 +21,6 @@ function App() {
   const [dnsCheckInProgress, setDnsCheckInProgress] = useState(false);
   const [dnsCheckProgress, setDnsCheckProgress] = useState('');
   const [dnsIssueFilter, setDnsIssueFilter] = useState('');
-  const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
 
   // Load initial data
   useEffect(() => {
@@ -368,20 +367,6 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleSelectionChange = (newSelection, clickedIndex, shiftKey) => {
-    if (shiftKey && lastSelectedIndex !== null && clickedIndex !== undefined) {
-      const start = Math.min(lastSelectedIndex, clickedIndex);
-      const end = Math.max(lastSelectedIndex, clickedIndex);
-      const rangeSelection = filteredDomains.slice(start, end + 1).map(d => d.domain_name);
-      const combined = new Set([...selectedDomains, ...rangeSelection]);
-      setSelectedDomains(Array.from(combined));
-    } else {
-      setSelectedDomains(newSelection);
-      if (clickedIndex !== undefined) {
-        setLastSelectedIndex(clickedIndex);
-      }
-    }
-  };
 
   if (loading) {
     return (
@@ -586,7 +571,7 @@ function App() {
             domains={filteredDomains}
             clients={clients}
             selectedDomains={selectedDomains}
-            onSelectionChange={handleSelectionChange}
+            onSelectionChange={setSelectedDomains}
             onSaveRedirect={handleSaveRedirect}
             onClientChange={handleClientChange}
             bulkUpdateResults={bulkUpdateResults}

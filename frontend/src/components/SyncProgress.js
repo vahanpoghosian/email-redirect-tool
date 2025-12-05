@@ -58,8 +58,6 @@ const SyncProgress = ({ onComplete }) => {
 
   const getStatusText = () => {
     switch (progress.status) {
-      case 'running':
-        return 'Status: In Progress';
       case 'completed':
         return 'Status: Completed';
       case 'error':
@@ -69,7 +67,7 @@ const SyncProgress = ({ onComplete }) => {
       case 'rate_limited':
         return 'Status: Paused - Rate Limited';
       default:
-        return 'Status: Initializing...';
+        return 'Status: In Progress';
     }
   };
 
@@ -80,15 +78,15 @@ const SyncProgress = ({ onComplete }) => {
       </div>
 
       <div style={{ color: '#6b7280', marginBottom: '0.5rem' }}>
-        {progress.status === 'running' && (
+        {(progress.status === 'running' || (progress.status !== 'completed' && progress.status !== 'error' && progress.status !== 'stopped' && progress.status !== 'rate_limited')) && (
           <>
-            Synced {progress.processed} of {progress.total} domains
+            Synced {progress.processed || 0} of {progress.total || 0} domains
             {progress.current_domain && (
               <> (Currently: {progress.current_domain})</>
             )}
             <br />
-            Added: {progress.domains_added} | Updated: {progress.domains_updated}
-            {(progress.total_errors || progress.errors.length) > 0 && (
+            Added: {progress.domains_added || 0} | Updated: {progress.domains_updated || 0}
+            {(progress.total_errors || (progress.errors && progress.errors.length)) > 0 && (
               <> | Errors: {progress.total_errors || progress.errors.length}</>
             )}
           </>
