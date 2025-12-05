@@ -1037,7 +1037,7 @@ DASHBOARD_TEMPLATE = """
                 }
 
                 // Auto-fill redirect URL field with client URL
-                const domainSafeId = domainName.replace(/\./g, '-');
+                const domainSafeId = domainName.replace(/[.]/g, '-');
                 const selectElement = document.querySelector(`select[onchange*="${domainName}"]`);
 
                 if (selectElement) {
@@ -1326,7 +1326,7 @@ DASHBOARD_TEMPLATE = """
         async function handleRedirectSubmit(form, domainName) {
             console.log('handleRedirectSubmit called for:', domainName);
             
-            const statusId = 'status-' + domainName.replace(/\./g, '-');
+            const statusId = 'status-' + domainName.replace(/[.]/g, '-');
             const statusElement = document.getElementById(statusId);
             const submitButton = form.querySelector('button[type="submit"]');
             const targetInput = form.querySelector('input[name="target"]');
