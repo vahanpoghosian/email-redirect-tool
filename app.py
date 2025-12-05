@@ -1844,31 +1844,23 @@ import threading
 import time
 
 def background_sync_with_rate_limiting(resume_from_index=None):
-    """Background sync with improved rate limiting and error handling"""
+    """Background sync with improved rate limiting and error handling - uses upsert to preserve data"""
     global sync_progress
-    
+
     try:
         sync_progress["status"] = "running"
-        
-        # Store existing domain numbers before clearing
+
+        # Get existing domain names to track updates vs new additions
         existing_domains = db.get_all_domains_with_redirections()
-        domain_numbers = {d['domain_name']: d['domain_number'] for d in existing_domains}
-        
-        # Clear existing domains from database
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM redirections')
-            cursor.execute('DELETE FROM domains WHERE id NOT IN (SELECT DISTINCT client_id FROM domains WHERE client_id IS NOT NULL)')
-            conn.commit()
-        
+        existing_domain_names = {d['domain_name'] for d in existing_domains}
+
         # Check if we're resuming from a paused state
         if resume_from_index is not None and sync_progress.get("paused_domains"):
             print(f"🔄 Resuming sync from domain index {resume_from_index}")
             namecheap_domains = sync_progress["paused_domains"]
-            # Start from where we left off
             start_index = resume_from_index
         else:
-            # Get all domains from Namecheap with retry logic (fresh start)
+            # Get all domains from Namecheap with retry logic
             namecheap_domains = []
             retry_count = 0
             max_retries = 3
@@ -1881,29 +1873,17 @@ def background_sync_with_rate_limiting(resume_from_index=None):
                     retry_count += 1
                     if retry_count < max_retries:
                         print(f"Retrying domain list fetch ({retry_count}/{max_retries})...")
-                        time.sleep(5)  # Wait 5 seconds before retry
+                        time.sleep(5)
                 except Exception as e:
                     retry_count += 1
                     print(f"Error fetching domains (attempt {retry_count}): {e}")
                     if retry_count < max_retries:
-                        time.sleep(10)  # Wait longer on error
+                        time.sleep(10)
 
             if not namecheap_domains:
                 sync_progress["status"] = "error"
                 sync_progress["error"] = "No domains found in Namecheap after retries"
                 return
-
-            # Fresh start, clear database
-            # Store existing domain numbers before clearing
-            existing_domains = db.get_all_domains_with_redirections()
-            domain_numbers = {d['domain_name']: d['domain_number'] for d in existing_domains}
-
-            # Clear existing domains from database
-            with db.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('DELETE FROM redirections')
-                cursor.execute('DELETE FROM domains WHERE id NOT IN (SELECT DISTINCT client_id FROM domains WHERE client_id IS NOT NULL)')
-                conn.commit()
 
             start_index = 0
         
@@ -1924,20 +1904,17 @@ def background_sync_with_rate_limiting(resume_from_index=None):
 
             try:
                 print(f"Processing {i}/{sync_progress['total']}: {domain_name}")
-                
-                # Add domain using the proper function
+
+                # Add or update domain (existing domains keep their client assignments in DB)
                 try:
-                    if domain_name in domain_numbers:
-                        # Update existing domain (it should already exist, just update timestamp)
-                        db.add_or_update_domain(domain_name)
+                    is_existing = domain_name in existing_domain_names
+                    db.add_or_update_domain(domain_name)
+                    if is_existing:
                         sync_progress["domains_updated"] += 1
                     else:
-                        # New domain gets new number
-                        db.add_or_update_domain(domain_name)
                         sync_progress["domains_added"] += 1
                 except Exception as domain_error:
                     print(f"⚠️ Error adding domain {domain_name}: {domain_error}")
-                    # Continue processing even if domain add fails
                     sync_progress["errors"].append(f"{domain_name}: Database error - {str(domain_error)}")
                 
                 # Get redirections and DNS records with retry logic for rate limits
