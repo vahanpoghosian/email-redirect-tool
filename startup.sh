@@ -31,4 +31,4 @@ fi
 export DATABASE_PATH=/opt/render/project/data/redirect_tool.db
 
 echo "🌐 Starting Gunicorn server..."
-exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 600 --graceful-timeout 600 app:app

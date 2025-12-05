@@ -897,7 +897,6 @@ class NamecheapAPIClient:
     def _get_all_hosts(self, domain: str) -> List[Dict]:
         """Get all DNS host records for a domain"""
         try:
-            print(f"🔍 DEBUG: Getting all hosts for {domain}")
             # Split domain into SLD and TLD as required by Namecheap API
             domain_parts = domain.split('.')
             if len(domain_parts) < 2:
@@ -923,8 +922,6 @@ class NamecheapAPIClient:
                 TLD=tld
             )
 
-            print(f"🔍 DEBUG: Response keys: {list(response.keys())}")
-
             hosts = []
 
             # Find CommandResponse (may be namespaced)
@@ -932,60 +929,37 @@ class NamecheapAPIClient:
             for key, value in response.items():
                 if 'CommandResponse' in key:
                     command_response = value
-                    print(f"🔍 DEBUG: Found CommandResponse in key: {key}")
                     break
 
             if not command_response:
-                print(f"❌ DEBUG: No CommandResponse found in response keys: {list(response.keys())}")
                 return []
-
-            print(f"🔍 DEBUG: CommandResponse keys: {list(command_response.keys())}")
 
             # Find DomainDNSGetHostsResult
             hosts_result = None
             for key, value in command_response.items():
                 if 'DomainDNSGetHostsResult' in key:
                     hosts_result = value
-                    print(f"🔍 DEBUG: Found DomainDNSGetHostsResult in key: {key}")
                     break
 
             if not hosts_result:
-                print(f"❌ DEBUG: No DomainDNSGetHostsResult found in CommandResponse keys: {list(command_response.keys())}")
                 return []
-
-            print(f"🔍 DEBUG: DomainDNSGetHostsResult keys: {list(hosts_result.keys())}")
-            print(f"🔍 DEBUG: DomainDNSGetHostsResult content: {hosts_result}")
 
             # Find Host data (may be namespaced or direct)
             # Note: Namecheap uses lowercase 'host' in the response
             host_data = None
             for key, value in hosts_result.items():
-                if 'host' in key.lower():  # Check for both 'Host' and 'host'
+                if 'host' in key.lower():
                     host_data = value
-                    print(f"🔍 DEBUG: Found Host data in key: {key}")
                     break
 
             if not host_data:
-                print(f"❌ DEBUG: No Host data found in DomainDNSGetHostsResult keys: {list(hosts_result.keys())}")
-                # Check if there's an error in the response
-                for key, value in hosts_result.items():
-                    if 'error' in key.lower() or 'Error' in key:
-                        print(f"❌ DEBUG: API Error found: {key} = {value}")
-                # Check if domain has no DNS records (empty result is valid)
-                if 'IsUsingOurDNS' in hosts_result and hosts_result.get('IsUsingOurDNS') == 'true':
-                    print(f"ℹ️ INFO: Domain {domain} is using Namecheap DNS but has no host records configured")
-                    return []  # Empty list is valid
                 return []
             
             # Handle single host or list of hosts
             if isinstance(host_data, dict):
                 host_data = [host_data]
 
-            print(f"🔍 DEBUG: Raw host_data type: {type(host_data)}")
-            print(f"🔍 DEBUG: Number of records: {len(host_data) if host_data else 0}")
-
             if not host_data:
-                print(f"⚠️  WARNING: No host data returned for {domain}")
                 return []
 
             # Normalize the host data format and categorize by type
@@ -1004,29 +978,9 @@ class NamecheapAPIClient:
                     }
                     normalized_hosts.append(normalized_host)
 
-                    # Count record types
                     record_type = normalized_host['Type']
                     record_types[record_type] = record_types.get(record_type, 0) + 1
 
-                    # Special logging for different record types
-                    if record_type == 'MX':
-                        print(f"  📧 MX Record: {normalized_host['Name']} -> {normalized_host['Address']} (Priority: {normalized_host['MXPref']})")
-                    elif record_type == 'A':
-                        print(f"  🌐 A Record: {normalized_host['Name']} -> {normalized_host['Address']}")
-                    elif record_type == 'CNAME':
-                        print(f"  🔗 CNAME: {normalized_host['Name']} -> {normalized_host['Address']}")
-                    elif record_type == 'TXT':
-                        print(f"  📄 TXT: {normalized_host['Name']} -> {normalized_host['Address'][:50]}...")
-                    elif record_type == 'URL':
-                        print(f"  ↗️  URL Redirect: {normalized_host['Name']} -> {normalized_host['Address']}")
-                    else:
-                        print(f"  📝 {record_type}: {normalized_host['Name']} -> {normalized_host['Address'][:50]}...")
-
-            print(f"✅ Successfully retrieved {len(normalized_hosts)} DNS records for {domain}")
-            print(f"📊 Record types: {', '.join([f'{count} {rtype}' for rtype, count in record_types.items()])}")
-            print('********** normalized_hosts **********')
-            print(normalized_hosts)
-            print('**************end normalized host***********************')
             return normalized_hosts
             
         except Exception as e:
