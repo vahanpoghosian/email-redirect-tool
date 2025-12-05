@@ -10,13 +10,17 @@ from typing import List, Dict, Optional
 
 class Database:
     def __init__(self, db_path: str = None):
-        # Use provided path or default to current directory
+        import os
         if db_path:
             self.db_path = db_path
         else:
-            import os
-            # Use environment variable if available (for production)
-            self.db_path = os.environ.get('DATABASE_PATH', 'redirect_tool.db')
+            env_path = os.environ.get('DATABASE_PATH')
+            if env_path:
+                self.db_path = env_path
+            elif os.path.exists('/opt/render/project/data'):
+                self.db_path = '/opt/render/project/data/redirect_tool.db'
+            else:
+                self.db_path = 'redirect_tool.db'
 
         print(f"Using database at: {self.db_path}")
         self.init_database()
