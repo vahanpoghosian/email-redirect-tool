@@ -3083,11 +3083,6 @@ def get_domains():
         for i, domain_name in enumerate(domain_names, 1):
             db_domain = db_lookup.get(domain_name.lower(), {})
 
-            # Debug: Log if domain not found in database
-            if not db_domain:
-                print(f"⚠️ WARNING: Domain '{domain_name}' from Namecheap not found in database")
-            else:
-                print(f"✓ Domain '{domain_name}' found in DB with dns_issues: {db_domain.get('dns_issues')}")
 
             # Use database domain number if available
             domain_number = db_domain.get('domain_number', i)
@@ -3095,15 +3090,12 @@ def get_domains():
             # Get the primary redirect URL from the redirections array
             redirect_url = ''
             redirections = db_domain.get('redirections', [])
-            print(f"DEBUG: Domain {domain_name} has {len(redirections)} redirections in DB")
             for redirect in redirections:
-                print(f"DEBUG: Redirect: name={redirect.get('name')}, type={redirect.get('type')}, target={redirect.get('target')}")
                 # Check for @ record with any URL type
                 if redirect.get('name') == '@':
                     redirect_type = redirect.get('type', '').lower()
                     if 'url' in redirect_type or redirect_type in ['url', 'url redirect', 'redirect']:
                         redirect_url = redirect.get('target', '')
-                        print(f"DEBUG: Using redirect URL: {redirect_url}")
                         break
 
             # If no @ record found, check for any URL redirect as fallback
