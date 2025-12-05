@@ -20,6 +20,8 @@ function App() {
   const [bulkUpdateResults, setBulkUpdateResults] = useState({});
   const [dnsCheckInProgress, setDnsCheckInProgress] = useState(false);
   const [dnsCheckProgress, setDnsCheckProgress] = useState('');
+  const [dnsIssueFilter, setDnsIssueFilter] = useState('');
+  const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
 
   // Load initial data
   useEffect(() => {
@@ -29,17 +31,12 @@ function App() {
 
   const loadDomainsAndClients = async () => {
     try {
-      // Try to load domains from main endpoint
       const [domainsRes, clientsRes] = await Promise.all([
-        axios.get('/api/domains'),
+        axios.get('/api/domains-from-db'),
         axios.get('/api/clients')
       ]);
 
       if (domainsRes.data.status === 'success') {
-        setDomains(domainsRes.data.domains || []);
-        console.log('Loaded', domainsRes.data.domains?.length || 0, 'domains');
-      } else if (domainsRes.data.domains) {
-        // Fallback: if status is not success but we have domains
         setDomains(domainsRes.data.domains || []);
       }
 
@@ -47,25 +44,8 @@ function App() {
         setClients(clientsRes.data.clients || []);
       }
     } catch (error) {
-      console.error('Error loading from /api/domains, trying database fallback:', error);
-
-      // If main endpoint fails, try database-only endpoint
-      try {
-        const dbRes = await axios.get('/api/domains-from-db');
-        if (dbRes.data.status === 'success') {
-          setDomains(dbRes.data.domains || []);
-          console.log('Loaded', dbRes.data.domains?.length || 0, 'domains from database');
-        }
-
-        // Also try to get clients again
-        const clientsRes = await axios.get('/api/clients');
-        if (clientsRes.data.status === 'success') {
-          setClients(clientsRes.data.clients || []);
-        }
-      } catch (dbError) {
-        console.error('Database fallback also failed:', dbError);
-        setDomains([]);
-      }
+      console.error('Error loading data:', error);
+      setDomains([]);
     } finally {
       setLoading(false);
     }
@@ -353,11 +333,55 @@ function App() {
     }
   };
 
+  const dnsIssueOptions = React.useMemo(() => {
+    const issues = new Set();
+    domains.forEach(d => {
+      if (d.dns_issues) issues.add(d.dns_issues);
+    });
+    return Array.from(issues).sort();
+  }, [domains]);
+
   const filteredDomains = domains.filter(domain => {
     const matchesSearch = domain.domain_name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesClient = !clientFilter || domain.client_id === parseInt(clientFilter);
-    return matchesSearch && matchesClient;
+    const matchesDnsIssue = !dnsIssueFilter || domain.dns_issues === dnsIssueFilter;
+    return matchesSearch && matchesClient && matchesDnsIssue;
   });
+
+  const exportToCsv = () => {
+    const headers = ['#', 'Domain', 'Redirect URL', 'Client', 'DNS Issues', 'Status'];
+    const rows = filteredDomains.map(d => [
+      d.domain_number || '',
+      d.domain_name,
+      d.redirect_url || '',
+      d.client_name || 'Unassigned',
+      d.dns_issues || 'Not Checked',
+      d.status || ''
+    ]);
+    const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `domains_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSelectionChange = (newSelection, clickedIndex, shiftKey) => {
+    if (shiftKey && lastSelectedIndex !== null && clickedIndex !== undefined) {
+      const start = Math.min(lastSelectedIndex, clickedIndex);
+      const end = Math.max(lastSelectedIndex, clickedIndex);
+      const rangeSelection = filteredDomains.slice(start, end + 1).map(d => d.domain_name);
+      const combined = new Set([...selectedDomains, ...rangeSelection]);
+      setSelectedDomains(Array.from(combined));
+    } else {
+      setSelectedDomains(newSelection);
+      if (clickedIndex !== undefined) {
+        setLastSelectedIndex(clickedIndex);
+      }
+    }
+  };
 
   if (loading) {
     return (
@@ -469,6 +493,14 @@ function App() {
 
             <button
               className="btn"
+              onClick={exportToCsv}
+              style={{ backgroundColor: '#059669' }}
+            >
+              📥 Export CSV
+            </button>
+
+            <button
+              className="btn"
               onClick={backupDatabase}
               style={{ backgroundColor: '#6366f1' }}
             >
@@ -506,11 +538,25 @@ function App() {
                 </option>
               ))}
             </select>
+            <select
+              className="form-control"
+              value={dnsIssueFilter}
+              onChange={(e) => setDnsIssueFilter(e.target.value)}
+              style={{ width: '200px' }}
+            >
+              <option value="">All DNS Issues</option>
+              {dnsIssueOptions.map(issue => (
+                <option key={issue} value={issue}>
+                  {issue === 'ok' ? '✅ OK' : issue}
+                </option>
+              ))}
+            </select>
             <button
               className="btn"
               onClick={() => {
                 setSearchQuery('');
                 setClientFilter('');
+                setDnsIssueFilter('');
               }}
             >
               Clear All
@@ -540,7 +586,7 @@ function App() {
             domains={filteredDomains}
             clients={clients}
             selectedDomains={selectedDomains}
-            onSelectionChange={setSelectedDomains}
+            onSelectionChange={handleSelectionChange}
             onSaveRedirect={handleSaveRedirect}
             onClientChange={handleClientChange}
             bulkUpdateResults={bulkUpdateResults}

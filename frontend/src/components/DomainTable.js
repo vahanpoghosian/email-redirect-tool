@@ -21,11 +21,11 @@ const DomainTable = ({
     }
   };
 
-  const handleDomainSelect = (domainName, checked) => {
+  const handleDomainSelect = (domainName, checked, index, shiftKey) => {
     if (checked) {
-      onSelectionChange([...selectedDomains, domainName]);
+      onSelectionChange([...selectedDomains, domainName], index, shiftKey);
     } else {
-      onSelectionChange(selectedDomains.filter(d => d !== domainName));
+      onSelectionChange(selectedDomains.filter(d => d !== domainName), index, false);
     }
   };
 
@@ -159,13 +159,17 @@ const DomainTable = ({
         </tr>
       </thead>
       <tbody>
-        {domains.map((domain) => (
+        {domains.map((domain, index) => (
           <tr key={domain.domain_name}>
             <td>
               <input
                 type="checkbox"
                 checked={selectedDomains.includes(domain.domain_name)}
-                onChange={(e) => handleDomainSelect(domain.domain_name, e.target.checked)}
+                onChange={() => {}}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleDomainSelect(domain.domain_name, !selectedDomains.includes(domain.domain_name), index, e.shiftKey);
+                }}
               />
             </td>
             <td>

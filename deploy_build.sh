@@ -23,26 +23,13 @@ else
     echo "🔨 Database will be created on first run"
 fi
 
-# Build frontend if needed
-echo "🔨 Checking React frontend..."
-if [ -d "frontend/build" ] && [ -f "frontend/build/index.html" ]; then
-    echo "✅ React build files already exist, skipping npm build"
-else
-    echo "📦 React build not found, building..."
-
-    # Navigate to frontend directory
-    cd frontend
-
-    # Install dependencies
-    echo "📦 Installing frontend dependencies..."
-    npm ci --only=production
-
-    # Build React app
-    echo "⚛️ Building React app..."
-    npm run build
-
-    # Return to main directory
-    cd ..
-fi
+# Always build frontend to ensure latest code is deployed
+echo "🔨 Building React frontend..."
+cd frontend
+echo "📦 Installing frontend dependencies..."
+npm ci
+echo "⚛️ Building React app..."
+npm run build
+cd ..
 
 echo "✅ Build complete! Application ready to start."

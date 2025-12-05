@@ -353,73 +353,47 @@ class Database:
                                ''', (domain_id, redirect.get('name', '@'), redirect.get('target', ''), redirect.get('type', 'URL')))
 
     def get_all_domains_with_redirections(self) -> List[Dict]:
-        """Get all domains with their redirections and client info"""
+        """Get all domains with their redirections and client info - optimized single query"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                           SELECT d.id,
-                                  d.domain_number,
-                                  d.domain_name,
-                                  c.client_name,
-                                  c.id as client_id,
-                                  d.updated_at,
-                                  d.sync_status,
-                                  d.dns_issues
-                           FROM domains d
-                                    LEFT JOIN clients c ON d.client_id = c.id
-                           ORDER BY d.domain_number
-                           ''')
+                SELECT d.id, d.domain_number, d.domain_name, c.client_name, c.id as client_id,
+                       d.updated_at, d.sync_status, d.dns_issues,
+                       r.redirect_name, r.redirect_target, r.redirect_type
+                FROM domains d
+                LEFT JOIN clients c ON d.client_id = c.id
+                LEFT JOIN redirections r ON d.id = r.domain_id
+                ORDER BY d.domain_number, d.id
+            ''')
 
-            domains = []
+            domains_map = {}
             for row in cursor.fetchall():
-                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status, dns_issues = row
+                domain_id, domain_number, domain_name, client_name, client_id, updated_at, sync_status, dns_issues, redirect_name, redirect_target, redirect_type = row
 
-                # Get redirections
-                cursor.execute('''
-                               SELECT redirect_name, redirect_target, redirect_type
-                               FROM redirections
-                               WHERE domain_id = ?
-                               ''', (domain_id,))
+                if domain_id not in domains_map:
+                    domains_map[domain_id] = {
+                        'id': domain_id,
+                        'domain_number': domain_number,
+                        'domain_name': domain_name,
+                        'client_name': client_name or 'Unassigned',
+                        'client_id': client_id,
+                        'redirections': [],
+                        'redirect_url': '',
+                        'updated_at': updated_at,
+                        'sync_status': sync_status or 'unchanged',
+                        'dns_issues': dns_issues
+                    }
 
-                redirections = []
-                auto_detected_client_id = client_id
-                auto_detected_client_name = client_name
-
-                for redirect_row in cursor.fetchall():
-                    redirections.append({
-                        'name': redirect_row[0],
-                        'target': redirect_row[1],
-                        'type': redirect_row[2]
+                if redirect_name:
+                    domains_map[domain_id]['redirections'].append({
+                        'name': redirect_name,
+                        'target': redirect_target,
+                        'type': redirect_type
                     })
+                    if redirect_name == '@' and redirect_target:
+                        domains_map[domain_id]['redirect_url'] = redirect_target
 
-                    # Auto-detect client from redirect URL if not already assigned
-                    if not client_id or client_name == 'Unassigned':
-                        redirect_target = redirect_row[1]
-                        if redirect_target:
-                            matched_client = self.find_client_by_url(redirect_target)
-                            if matched_client:
-                                auto_detected_client_id = matched_client['id']
-                                auto_detected_client_name = matched_client['name']
-                                # Update domain with detected client
-                                cursor.execute('''
-                                               UPDATE domains
-                                               SET client_id = ?
-                                               WHERE id = ?
-                                               ''', (matched_client['id'], domain_id))
-
-                domains.append({
-                    'id': domain_id,
-                    'domain_number': domain_number,
-                    'domain_name': domain_name,
-                    'client_name': auto_detected_client_name or 'Unassigned',
-                    'client_id': auto_detected_client_id,
-                    'redirections': redirections,
-                    'updated_at': updated_at,
-                    'sync_status': sync_status or 'unchanged',
-                    'dns_issues': dns_issues
-                })
-
-            return domains
+            return list(domains_map.values())
 
     def get_all_clients(self) -> List[Dict]:
         """Get all clients"""
