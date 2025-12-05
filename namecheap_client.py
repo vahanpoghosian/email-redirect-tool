@@ -922,8 +922,6 @@ class NamecheapAPIClient:
                 TLD=tld
             )
 
-            hosts = []
-
             # Find CommandResponse (may be namespaced)
             command_response = None
             for key, value in response.items():
@@ -959,16 +957,10 @@ class NamecheapAPIClient:
             if isinstance(host_data, dict):
                 host_data = [host_data]
 
-            if not host_data:
-                return []
-
-            # Normalize the host data format and categorize by type
+            # Normalize the host data format
             normalized_hosts = []
-            record_types = {}
-
             for host in host_data:
                 if isinstance(host, dict):
-                    # Map lowercase field names to expected format
                     normalized_host = {
                         'Name': host.get('Name', host.get('name', '@')),
                         'Type': host.get('Type', host.get('type', '')),
@@ -977,9 +969,6 @@ class NamecheapAPIClient:
                         'MXPref': host.get('MXPref', host.get('mxpref', ''))
                     }
                     normalized_hosts.append(normalized_host)
-
-                    record_type = normalized_host['Type']
-                    record_types[record_type] = record_types.get(record_type, 0) + 1
 
             return normalized_hosts
             
